@@ -712,10 +712,10 @@ public class LibJitsiAudioSipuadaPlugin implements SipuadaPlugin {
 	}
 
 	private String retrieveControlConnectionInfo(String connectionLine) {
-		connectionLine = connectionLine.trim();
 		String controlAddress = "";
 		String controlPort = "";
 		if (connectionLine != null) {
+			connectionLine = connectionLine.trim();
 			try {
 				Integer.parseInt(connectionLine);
 				controlPort = connectionLine;
