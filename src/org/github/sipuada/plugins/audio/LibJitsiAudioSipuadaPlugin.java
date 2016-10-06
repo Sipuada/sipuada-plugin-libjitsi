@@ -346,7 +346,7 @@ public class LibJitsiAudioSipuadaPlugin implements SipuadaPlugin {
 			int localPort = new Random().nextInt((32767 - 16384)) + 16384;
 			mediaField.setPort(localPort);
 			mediaDescription.setMediaField(mediaField);
-			AttributeField rtcpAttribute = createRtcpField(localAddress, localPort);
+			AttributeField rtcpAttribute = createRtcpField(localAddress, localPort + 1);
 			mediaDescription.addAttribute(rtcpAttribute);
 			AttributeField sendReceiveAttribute = new AttributeField();
 			sendReceiveAttribute.setValue("sendrecv");
@@ -418,7 +418,7 @@ public class LibJitsiAudioSipuadaPlugin implements SipuadaPlugin {
 							((MediaDescriptionImpl) cloneMediaDescription)
 								.setMediaField(mediaField);
 							AttributeField rtcpAttribute = createRtcpField
-								(localAddress, localPort);
+								(localAddress, localPort + 1);
 							cloneMediaDescription.addAttribute(rtcpAttribute);
 							AttributeField sendReceiveAttribute
 								= new AttributeField();
