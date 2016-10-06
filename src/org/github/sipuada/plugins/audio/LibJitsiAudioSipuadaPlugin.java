@@ -7,6 +7,7 @@ import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
+import java.util.UUID;
 import java.util.Vector;
 
 import org.github.sipuada.Constants.RequestMethod;
@@ -78,21 +79,19 @@ public class LibJitsiAudioSipuadaPlugin implements SipuadaPlugin {
 
     public enum SupportedAudioCodec {
 
-    	PCMA_8("PCMA", "PCMA/8000", 8, 8000, true),
-    	SPEEX_8("SPEEX", "SPEEX/8000", 97, 8000, false),
-    	SPEEX_16("SPEEX", "SPEEX/16000", 97, 16000, false),
-    	SPEEX_32("SPEEX", "SPEEX/32000", 97, 32000, false);
+    	PCMA_8("PCMA", 8, 8000, true),
+    	SPEEX_8("SPEEX", 97, 8000, false),
+    	SPEEX_16("SPEEX", 97, 16000, false),
+    	SPEEX_32("SPEEX", 97, 32000, false);
 
     	private final String encoding;
-    	private final String rtpmap;
     	private final int type;
     	private final int clockRate;
     	private final boolean enabled;
 
-    	private SupportedAudioCodec(String encoding, String rtpmap,
-    			int type, int clockRate, boolean enabled) {
-    		this.encoding = encoding;
-    		this.rtpmap = rtpmap;
+    	private SupportedAudioCodec(String encoding, int type,
+        		int clockRate, boolean enabled) {
+        	this.encoding = encoding;
     		this.type = type;
     		this.clockRate = clockRate;
     		this.enabled = enabled;
@@ -101,10 +100,6 @@ public class LibJitsiAudioSipuadaPlugin implements SipuadaPlugin {
     	public String getEncoding() {
     		return encoding;
     	}
-
-		public String getRtpmap() {
-			return rtpmap;
-		}
 
 		public int getType() {
 			return type;
@@ -116,6 +111,10 @@ public class LibJitsiAudioSipuadaPlugin implements SipuadaPlugin {
 
 		public boolean isEnabled() {
 			return enabled;
+		}
+
+		public String getRtpmap() {
+			return String.format(Locale.US, "%s/%d", encoding, clockRate);
 		}
 
     }
@@ -187,7 +186,7 @@ public class LibJitsiAudioSipuadaPlugin implements SipuadaPlugin {
 		}
 
     }
-    private final Map<SupportedAudioCodec, Session> flows = new HashMap<>();
+    private final Map<SupportedAudioCodec, Session> streams = new HashMap<>();
 
     private final String identifier;
 
@@ -329,13 +328,13 @@ public class LibJitsiAudioSipuadaPlugin implements SipuadaPlugin {
 			if (!audioCodec.isEnabled()) {
 				continue;
 			}
-			final String codecType = Integer.toString(audioCodec.type);
+			final String codecType = Integer.toString(audioCodec.getType());
 			allMediaFormats.add(codecType);
 			MediaDescriptionImpl mediaDescription = new MediaDescriptionImpl();
 			AttributeField rtpmapAttributeField = new AttributeField();
 			rtpmapAttributeField.setName(SdpConstants.RTPMAP);
 			rtpmapAttributeField.setValue(String.format(Locale.US, "%d %s",
-				audioCodec.type, audioCodec.rtpmap));
+				audioCodec.getType(), audioCodec.getRtpmap()));
 			mediaDescription.addAttribute(rtpmapAttributeField);
 			MediaField mediaField = new MediaField();
 			Vector<String> mediaFormats = new Vector<>();
@@ -395,8 +394,8 @@ public class LibJitsiAudioSipuadaPlugin implements SipuadaPlugin {
 							.split(" ")[0].trim());
 						String rtpmap = attributeField.getValue()
 							.split(" ")[1].trim();
-						if ((type >= 0 && type <= 34 && type == audioCodec.type)
-								|| rtpmap.toUpperCase().trim().equals(audioCodec.rtpmap)) {
+						if ((type >= 0 && type <= 34 && type == audioCodec.getType())
+								|| rtpmap.toUpperCase().trim().equals(audioCodec.getRtpmap())) {
 							String codecType = Integer.toString(type);
 							allMediaFormats.add(codecType);
 							MediaDescription cloneMediaDescription
@@ -546,7 +545,7 @@ public class LibJitsiAudioSipuadaPlugin implements SipuadaPlugin {
 								if (!audioCodec.isEnabled()) {
 									continue;
 								}
-								if (audioCodec.rtpmap.toLowerCase().equals
+								if (audioCodec.getRtpmap().toLowerCase().equals
 									(answerRtpmap.toLowerCase().trim())) {
 									supportedAudioCodec = audioCodec;
 									break;
@@ -565,14 +564,14 @@ public class LibJitsiAudioSipuadaPlugin implements SipuadaPlugin {
 							}
 							switch (roles.get(callId)) {
 								case CALLER:
-									flows.put(supportedAudioCodec,
+									streams.put(supportedAudioCodec,
 										new Session(offerDataAddress, offerDataPort,
 											offerControlAddress, offerControlPort,
 											answerDataAddress, answerDataPort,
 											answerControlAddress, answerControlPort));
 									break;
 								case CALLEE:
-									flows.put(supportedAudioCodec,
+									streams.put(supportedAudioCodec,
 										new Session(answerDataAddress, answerDataPort,
 											answerControlAddress, answerControlPort,
 											offerDataAddress, offerDataPort,
@@ -751,16 +750,23 @@ public class LibJitsiAudioSipuadaPlugin implements SipuadaPlugin {
 			callId, roles.get(callId), offer, answer);
         LibJitsi.start();
 		MediaService mediaService = LibJitsi.getMediaService();
-		for (SupportedAudioCodec supportedAudioCodec : flows.keySet()) {
-			Session session = flows.get(supportedAudioCodec);
-			logger.info("^^ Should setup a {} stream from "
-				+ "{}:{} (local) to {}:{} (remote)! ^^", supportedAudioCodec,
-				session.getLocalDataAddress(), session.getLocalDataPort(),
+		for (SupportedAudioCodec supportedAudioCodec : streams.keySet()) {
+			final String streamName = UUID.randomUUID().toString();
+			Session session = streams.get(supportedAudioCodec);
+			logger.info("^^ Should setup a {} *data* stream [{}] from "
+				+ "{}:{} (origin) to {}:{} (destination)! ^^", supportedAudioCodec,
+				streamName, session.getLocalDataAddress(), session.getLocalDataPort(),
 				session.getRemoteDataAddress(), session.getRemoteDataPort());
+			logger.info("^^ Should setup a {} *control* stream [{}] from "
+				+ "{}:{} (origin) to {}:{} (destination)! ^^", supportedAudioCodec,
+				streamName, session.getLocalControlAddress(),
+				session.getLocalControlPort(), session.getRemoteControlAddress(),
+				session.getRemoteControlPort());
 			MediaDevice device = mediaService.getDefaultDevice
 				(MediaType.AUDIO, MediaUseCase.CALL);
 			MediaStream mediaStream = mediaService
 				.createMediaStream(device);
+			mediaStream.setName(streamName);
 			mediaStream.setDirection(MediaDirection.SENDRECV);
 			MediaFormat mediaFormat = mediaService.getFormatFactory()
 				.createMediaFormat(supportedAudioCodec.getEncoding(),
@@ -781,24 +787,21 @@ public class LibJitsiAudioSipuadaPlugin implements SipuadaPlugin {
 				mediaStream.setTarget(target);
 				session.setStream(mediaStream);
 			} catch (Throwable anyIssue) {
-				logger.error("^^ Errored while trying to setup {} stream! ^^",
-					supportedAudioCodec, anyIssue);
+				logger.info("^^ Could not setup {} *data* stream [{}]! ^^",
+					supportedAudioCodec, streamName);
+				logger.info("^^ Could not setup {} *control* stream [{}]! ^^",
+					supportedAudioCodec, streamName, anyIssue);
 			}
 		}
-		for (SupportedAudioCodec supportedAudioCodec : flows.keySet()) {
-			Session session = flows.get(supportedAudioCodec);
+		for (SupportedAudioCodec supportedAudioCodec : streams.keySet()) {
+			Session session = streams.get(supportedAudioCodec);
 			MediaStream mediaStream = session.getStream();
 			if (mediaStream != null) {
-				logger.info("^^ Starting {} stream from "
-					+ "{}:{} (local) to {}:{} (remote)! ^^", supportedAudioCodec,
-					session.getLocalDataAddress(), session.getLocalDataPort(),
-					session.getRemoteDataAddress(), session.getRemoteDataPort());
+				logger.info("^^ Starting {} *data* stream [{}]! ^^",
+					supportedAudioCodec, mediaStream.getName());
+				logger.info("^^ Starting {} *control* stream [{}]! ^^",
+					supportedAudioCodec, mediaStream.getName());
 				mediaStream.start();
-			} else {
-				logger.info("^^ Could not setup {} stream from "
-					+ "{}:{} (local) to {}:{} (remote)! ^^", supportedAudioCodec,
-					session.getLocalDataAddress(), session.getLocalDataPort(),
-					session.getRemoteDataAddress(), session.getRemoteDataPort());
 			}
 		}
 		return true;
@@ -810,22 +813,29 @@ public class LibJitsiAudioSipuadaPlugin implements SipuadaPlugin {
 		logger.info("^^ {} performing session tear down in context of call {}... ^^",
 			LibJitsiAudioSipuadaPlugin.class.getSimpleName(), callId);
 		try {
-			for (SupportedAudioCodec supportedAudioCodec : flows.keySet()) {
-				Session session = flows.get(supportedAudioCodec);
-				logger.info("^^ Should terminate {} flow from "
-					+ "{}:{} (local) to {}:{} (remote)! ^^", supportedAudioCodec,
-					session.getLocalDataAddress(), session.getLocalDataPort(),
-					session.getRemoteDataAddress(), session.getRemoteDataPort());
+			for (SupportedAudioCodec supportedAudioCodec : streams.keySet()) {
+				Session session = streams.get(supportedAudioCodec);
 				MediaStream mediaStream = session.getStream();
 				if (mediaStream != null) {
+					logger.info("^^ Should terminate {} *data* stream [{}] from "
+						+ "{}:{} (origin) to {}:{} (destination)! ^^", supportedAudioCodec,
+						mediaStream.getName(), session.getLocalDataAddress(),
+						session.getLocalDataPort(), session.getRemoteDataAddress(),
+						session.getRemoteDataPort());
+					logger.info("^^ Should terminate {} *control* stream [{}] from "
+						+ "{}:{} (origin) to {}:{} (destination)! ^^", supportedAudioCodec,
+						mediaStream.getName(), session.getLocalControlAddress(),
+						session.getLocalControlPort(), session.getRemoteControlAddress(),
+						session.getRemoteControlPort());
 					try {
-						logger.info("^^ Stopping {} stream... ^^",
-							supportedAudioCodec);
+						logger.info("^^ Stopping {} stream [{}]... ^^",
+							supportedAudioCodec, mediaStream.getName());
 						mediaStream.stop();
 					} finally {
 						mediaStream.close();
 					}
-					logger.info("^^ {} stream stopped! ^^", supportedAudioCodec);
+					logger.info("^^ {} stream [{}] stopped! ^^",
+						supportedAudioCodec, mediaStream.getName());
 				}
 			}
 		} finally {
