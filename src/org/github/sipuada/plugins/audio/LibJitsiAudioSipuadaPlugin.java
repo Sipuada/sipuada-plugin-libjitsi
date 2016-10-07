@@ -611,11 +611,13 @@ public class LibJitsiAudioSipuadaPlugin implements SipuadaPlugin {
 		String possibleParentControlConnection
 			= retrieveControlConnectionInfo(sdp);
 		final String parentControlAddress = possibleParentControlConnection == null
-			? null : possibleParentControlConnection.split(":")[0].trim().isEmpty()
-			? null : possibleParentControlConnection.split(":")[0];
+			|| !possibleParentControlConnection.contains("\\:")
+			? null : possibleParentControlConnection.split("\\:")[0].trim().isEmpty()
+			? null : possibleParentControlConnection.split("\\:")[0];
 		final String parentControlPort = possibleParentControlConnection == null
-			? null : possibleParentControlConnection.split(":")[1].trim().isEmpty()
-			? null : possibleParentControlConnection.split(":")[1];
+			|| !possibleParentControlConnection.contains("\\:")
+			? null : possibleParentControlConnection.split("\\:")[1].trim().isEmpty()
+			? null : possibleParentControlConnection.split("\\:")[1];
 		if (possibleParentControlConnection == null) {
 			logger.debug("%% {} could not find parent control connection info! %%",
 				LibJitsiAudioSipuadaPlugin.class.getSimpleName());
@@ -676,14 +678,16 @@ public class LibJitsiAudioSipuadaPlugin implements SipuadaPlugin {
 								LibJitsiAudioSipuadaPlugin.class.getSimpleName());
 						}
 						final String controlAddress = possibleControlConnection == null
-							|| possibleControlConnection.split(":")[0].isEmpty()
+							|| !possibleControlConnection.contains("\\:")
+							|| possibleControlConnection.split("\\:")[0].isEmpty()
 							? parentControlAddress != null ? parentControlAddress
-							: dataAddress : possibleControlConnection.split(":")[0];
+							: dataAddress : possibleControlConnection.split("\\:")[0];
 						final int controlPort = possibleControlConnection == null
-							|| possibleControlConnection.split(":")[1].isEmpty()
+							|| !possibleControlConnection.contains("\\:")
+							|| possibleControlConnection.split("\\:")[1].isEmpty()
 							? parentControlPort == null ? dataPort + 1
 							: Integer.parseInt(parentControlPort) : Integer
-							.parseInt(possibleControlConnection.split(":")[1]);
+							.parseInt(possibleControlConnection.split("\\:")[1]);
 						callback.onConnectionInfoExtracted(dataAddress, dataPort,
 							controlAddress, controlPort,rtpmap, codecType);
 					}
