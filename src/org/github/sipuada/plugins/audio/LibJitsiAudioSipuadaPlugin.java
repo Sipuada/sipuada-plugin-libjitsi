@@ -186,7 +186,7 @@ public class LibJitsiAudioSipuadaPlugin implements SipuadaPlugin {
 		}
 
     }
-    private final Map<SupportedAudioCodec, Session> streams = new HashMap<>();
+    private final Map<String, Map<SupportedAudioCodec, Session>> streams = new HashMap<>();
 
     private final String identifier;
 
@@ -197,74 +197,76 @@ public class LibJitsiAudioSipuadaPlugin implements SipuadaPlugin {
 	}
 
 	@Override
-	public SessionDescription generateOffer(String callId, RequestMethod method,
-			String localAddress) {
-		roles.put(callId,  CallRole.CALLER);
+	public SessionDescription generateOffer(String callId, SessionType type,
+			RequestMethod method, String localAddress) {
+		roles.put(getSessionKey(callId, type),  CallRole.CALLER);
 		try {
 			SessionDescription offer = createSdpOffer(localAddress);
-			records.put(callId, new Record(offer));
-			logger.info("{} generating offer {{}} in context of call invitation {} "
+			records.put(getSessionKey(callId, type), new Record(offer));
+			logger.info("{} generating {} offer {{}} in context of call invitation {} "
 				+ "for a {} request...", LibJitsiAudioSipuadaPlugin.class
-				.getSimpleName(), offer, callId, method);
+				.getSimpleName(), type, offer, callId, method);
 			try {
-				return includeOfferedMediaTypes(offer, localAddress);
+				return includeOfferedMediaTypes(type, offer, localAddress);
 			} catch (Throwable anyIssue) {
-    			logger.error("{} could not include supported media types into "
+    			logger.error("{} could not include supported media types into {} "
 					+ "offer {{}} in context of call invitation {} for a {} request...",
-					LibJitsiAudioSipuadaPlugin.class.getSimpleName(), offer, callId,
+					LibJitsiAudioSipuadaPlugin.class.getSimpleName(), type, offer, callId,
 					method, anyIssue);
     			return null;
 			}
 		} catch (Throwable anyIssue) {
-			logger.error("{} could not generate offer in context of call "
+			logger.error("{} could not generate {} offer in context of call "
 				+ "invitation {} for a {} request...", LibJitsiAudioSipuadaPlugin
-				.class.getSimpleName(), callId, method, anyIssue);
+				.class.getSimpleName(), type, callId, method, anyIssue);
 			return null;
 		}
 	}
 
 	@Override
-	public void receiveAnswerToAcceptedOffer(String callId, SessionDescription answer) {
-		Record record = records.get(callId);
+	public void receiveAnswerToAcceptedOffer(String callId, SessionType type,
+			SessionDescription answer) {
+		Record record = records.get(getSessionKey(callId, type));
 		SessionDescription offer = record.getOffer();
 		record.setAnswer(answer);
-		logger.info("{} received answer {{}} to offer {{}} in context of call "
+		logger.info("{} received {} answer {{}} to {} offer {{}} in context of call "
 			+ "invitation {}...", LibJitsiAudioSipuadaPlugin.class.getSimpleName(),
-			answer, offer, callId);
+			type, answer, type, offer, callId);
 		try {
-			prepareForSessionSetup(callId, offer, answer);
+			prepareForSessionSetup(callId, type, offer, answer);
 		} catch (Throwable anyIssue) {
-			logger.error("{} could not prepare for session setup in "
+			logger.error("{} could not prepare for {} session setup in "
 				+ "context of call invitation {}!",
-				LibJitsiAudioSipuadaPlugin.class.getSimpleName(), callId, anyIssue);
+				LibJitsiAudioSipuadaPlugin.class.getSimpleName(), type, callId, anyIssue);
 		}
 	}
 
 	@Override
-	public SessionDescription generateAnswer(String callId, RequestMethod method,
-			SessionDescription offer, String localAddress) {
-        roles.put(callId, CallRole.CALLEE);
+	public SessionDescription generateAnswer(String callId, SessionType type,
+			RequestMethod method, SessionDescription offer, String localAddress) {
+        roles.put(getSessionKey(callId, type), CallRole.CALLEE);
         try {
     		SessionDescription answer = createSdpAnswer(offer, localAddress);
-    		records.put(callId, new Record(offer, answer));
-    		logger.info("{} generating answer {{}} to offer {{}} in context "
+    		records.put(getSessionKey(callId, type), new Record(offer, answer));
+    		logger.info("{} generating {} answer {{}} to {} offer {{}} in context "
     			+ "of call invitation {} for a {} request...",
     			LibJitsiAudioSipuadaPlugin.class.getSimpleName(),
-    			answer, offer, callId, method);
+    			type, answer, type, offer, callId, method);
     		try {
-        		return includeAcceptedMediaTypes(callId, answer, offer, localAddress);
+        		return includeAcceptedMediaTypes(callId, type, answer, offer, localAddress);
     		} catch (Throwable anyIssue) {
     			logger.error("{} could not include accepted media types "
-					+ "into answer {{}} to offer {{}} in context of call invitation"
+					+ "into {} answer {{}} to {} offer {{}} in context of call invitation"
 					+ " {} for a {} request...", LibJitsiAudioSipuadaPlugin
-					.class.getSimpleName(), answer, offer, callId, method, anyIssue);
+					.class.getSimpleName(), type, answer, type, offer,
+					callId, method, anyIssue);
     			return null;
     		}
         } catch (Throwable anyIssue) {
-			logger.error("{} could not generate answer to offer {{}} in context of "
+			logger.error("{} could not generate {} answer to {} offer {{}} in context of "
 				+ "call invitation {} for a {} request...",
 				LibJitsiAudioSipuadaPlugin.class.getSimpleName(),
-				offer, callId, method, anyIssue);
+				type, type, offer, callId, method, anyIssue);
 			return null;
         }
 	}
@@ -320,8 +322,8 @@ public class LibJitsiAudioSipuadaPlugin implements SipuadaPlugin {
 		return sessionNameField;
 	}
 
-	private SessionDescription includeOfferedMediaTypes(SessionDescription offer,
-			String localAddress) throws SdpException {
+	private SessionDescription includeOfferedMediaTypes(SessionType sessionType,
+			SessionDescription offer, String localAddress) throws SdpException {
 		Vector<String> allMediaFormats = new Vector<>();
 		Vector<MediaDescription> mediaDescriptions = new Vector<>();
 		for (SupportedAudioCodec audioCodec : SupportedAudioCodec.values()) {
@@ -356,8 +358,8 @@ public class LibJitsiAudioSipuadaPlugin implements SipuadaPlugin {
 			mediaDescriptions.add(mediaDescription);
 		}
 		offer.setMediaDescriptions(mediaDescriptions);
-		logger.info("<< {{}} codecs were declared in offer {{}} >>",
-			allMediaFormats, offer);
+		logger.info("<< {{}} codecs were declared in {} offer {{}} >>",
+			allMediaFormats, sessionType, offer);
 		return offer;
 	}
 
@@ -372,7 +374,7 @@ public class LibJitsiAudioSipuadaPlugin implements SipuadaPlugin {
 
 	@SuppressWarnings("unchecked")
 	private SessionDescription includeAcceptedMediaTypes(String callId,
-			SessionDescription answer, SessionDescription offer,
+			SessionType sessionType, SessionDescription answer, SessionDescription offer,
 			String localAddress) throws SdpException {
 		Vector<MediaDescription> offerMediaDescriptions = offer
 			.getMediaDescriptions(false);
@@ -437,14 +439,15 @@ public class LibJitsiAudioSipuadaPlugin implements SipuadaPlugin {
 			return null;
 		}
 		answer.setMediaDescriptions(answerMediaDescriptions);
-		logger.info("<< {{}} codecs were declared in answer {{}} to {{}} >>",
-			allMediaFormats, answer, offer);
+		logger.info("<< {{}} codecs were declared in {} answer {{}} to {} {{}} >>",
+			allMediaFormats, sessionType, answer, sessionType, offer);
 		try {
-			prepareForSessionSetup(callId, offer, answer);
+			prepareForSessionSetup(callId, sessionType, offer, answer);
 		} catch (Throwable anyIssue) {
-			logger.error("%% {} could not prepare for session setup in "
+			logger.error("%% {} could not prepare for {} session setup in "
 				+ "context of call invitation {}! %%",
-				LibJitsiAudioSipuadaPlugin.class.getSimpleName(), callId, anyIssue);
+				LibJitsiAudioSipuadaPlugin.class.getSimpleName(),
+				sessionType, callId, anyIssue);
 		}
 		return answer;
 	}
@@ -518,11 +521,11 @@ public class LibJitsiAudioSipuadaPlugin implements SipuadaPlugin {
 
 	}
 
-	private void prepareForSessionSetup(final String callId,
+	private void prepareForSessionSetup(final String callId, final SessionType type,
 			final SessionDescription offer, final SessionDescription answer)
 					throws SdpException {
 		extractConnectionInformation(answer, new ExtractionCallbackImpl
-				(roles.get(callId).toString(), "ANSWER") {
+				(roles.get(getSessionKey(callId, type)).toString(), "ANSWER") {
 
 			@Override
 			public void onConnectionInfoExtracted(final String answerDataAddress,
@@ -562,20 +565,24 @@ public class LibJitsiAudioSipuadaPlugin implements SipuadaPlugin {
 									LibJitsiAudioSipuadaPlugin.class.getSimpleName(),
 									answerRtpmap + " - " + answerCodecType);
 							}
-							switch (roles.get(callId)) {
+							if (!streams.containsKey(getSessionKey(callId, type))) {
+								streams.put(getSessionKey(callId, type),
+									new HashMap<SupportedAudioCodec, Session>());
+							}
+							switch (roles.get(getSessionKey(callId, type))) {
 								case CALLER:
-									streams.put(supportedAudioCodec,
-										new Session(offerDataAddress, offerDataPort,
-											offerControlAddress, offerControlPort,
-											answerDataAddress, answerDataPort,
-											answerControlAddress, answerControlPort));
+									streams.get(getSessionKey(callId, type)).put
+										(supportedAudioCodec, new Session(offerDataAddress,
+										offerDataPort, offerControlAddress, offerControlPort,
+										answerDataAddress, answerDataPort, answerControlAddress,
+										answerControlPort));
 									break;
 								case CALLEE:
-									streams.put(supportedAudioCodec,
-										new Session(answerDataAddress, answerDataPort,
-											answerControlAddress, answerControlPort,
-											offerDataAddress, offerDataPort,
-											offerControlAddress, offerControlPort));
+									streams.get(getSessionKey(callId, type)).put
+										(supportedAudioCodec, new Session(answerDataAddress,
+										answerDataPort, answerControlAddress, answerControlPort,
+										offerDataAddress, offerDataPort, offerControlAddress,
+										offerControlPort));
 									break;
 								}
 						}
@@ -745,18 +752,20 @@ public class LibJitsiAudioSipuadaPlugin implements SipuadaPlugin {
 	}
 
 	@Override
-	public boolean performSessionSetup(String callId, SipUserAgent userAgent) {
-		Record record = records.get(callId);
+	public boolean performSessionSetup(String callId, SessionType type, SipUserAgent userAgent) {
+		Record record = records.get(getSessionKey(callId, type));
 		SessionDescription offer = record.getOffer(), answer = record.getAnswer();
 		logger.info("^^ {} performing session setup in context of call {}...\n"
 			+ "Role: {{}}\nOffer: {{}}\nAnswer: {{}} ^^",
-			LibJitsiAudioSipuadaPlugin.class.getSimpleName(),
-			callId, roles.get(callId), offer, answer);
+			LibJitsiAudioSipuadaPlugin.class.getSimpleName(), callId,
+			roles.get(getSessionKey(callId, type)), offer, answer);
         LibJitsi.start();
 		MediaService mediaService = LibJitsi.getMediaService();
-		for (SupportedAudioCodec supportedAudioCodec : streams.keySet()) {
+		for (SupportedAudioCodec supportedAudioCodec : streams
+				.get(getSessionKey(callId, type)).keySet()) {
 			final String streamName = UUID.randomUUID().toString();
-			Session session = streams.get(supportedAudioCodec);
+			Session session = streams.get(getSessionKey(callId, type))
+				.get(supportedAudioCodec);
 			logger.info("^^ Should setup a {} *data* stream [{}] from "
 				+ "{}:{} (origin) to {}:{} (destination)! ^^", supportedAudioCodec,
 				streamName, session.getLocalDataAddress(), session.getLocalDataPort(),
@@ -797,8 +806,10 @@ public class LibJitsiAudioSipuadaPlugin implements SipuadaPlugin {
 					supportedAudioCodec, streamName, anyIssue);
 			}
 		}
-		for (SupportedAudioCodec supportedAudioCodec : streams.keySet()) {
-			Session session = streams.get(supportedAudioCodec);
+		for (SupportedAudioCodec supportedAudioCodec : streams
+				.get(getSessionKey(callId, type)).keySet()) {
+			Session session = streams.get(getSessionKey(callId, type))
+				.get(supportedAudioCodec);
 			MediaStream mediaStream = session.getStream();
 			if (mediaStream != null) {
 				logger.info("^^ Starting {} *data* stream [{}]! ^^",
@@ -812,13 +823,15 @@ public class LibJitsiAudioSipuadaPlugin implements SipuadaPlugin {
 	}
 
 	@Override
-	public boolean performSessionTermination(String callId) {
-		records.remove(callId);
+	public boolean performSessionTermination(String callId, SessionType type) {
+		records.remove(getSessionKey(callId, type));
 		logger.info("^^ {} performing session tear down in context of call {}... ^^",
 			LibJitsiAudioSipuadaPlugin.class.getSimpleName(), callId);
 		try {
-			for (SupportedAudioCodec supportedAudioCodec : streams.keySet()) {
-				Session session = streams.get(supportedAudioCodec);
+			for (SupportedAudioCodec supportedAudioCodec : streams
+					.get(getSessionKey(callId, type)).keySet()) {
+				Session session = streams.get(getSessionKey(callId, type))
+					.get(supportedAudioCodec);
 				MediaStream mediaStream = session.getStream();
 				if (mediaStream != null) {
 					logger.info("^^ Should terminate {} *data* stream [{}] from "
@@ -842,10 +855,15 @@ public class LibJitsiAudioSipuadaPlugin implements SipuadaPlugin {
 						supportedAudioCodec, mediaStream.getName());
 				}
 			}
+			streams.remove(getSessionKey(callId, type));
 		} finally {
 			LibJitsi.stop();
 		}
 		return true;
+	}
+
+	private String getSessionKey(String callId, SessionType type) {
+		return String.format(Locale.US, "%s_(%s)", callId, type);
 	}
 
 }
