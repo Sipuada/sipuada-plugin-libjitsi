@@ -80,9 +80,9 @@ public class LibJitsiAudioSipuadaPlugin implements SipuadaPlugin {
     public enum SupportedAudioCodec {
 
     	PCMA_8("PCMA", 8, 8000, true),
-    	SPEEX_8("SPEEX", 97, 8000, false),
-    	SPEEX_16("SPEEX", 97, 16000, false),
-    	SPEEX_32("SPEEX", 97, 32000, false);
+    	SPEEX_8("SPEEX", 97, 8000, true),
+    	SPEEX_16("SPEEX", 97, 16000, true),
+    	SPEEX_32("SPEEX", 97, 32000, true);
 
     	private final String encoding;
     	private final int type;
@@ -439,7 +439,7 @@ public class LibJitsiAudioSipuadaPlugin implements SipuadaPlugin {
 			return null;
 		}
 		answer.setMediaDescriptions(answerMediaDescriptions);
-		logger.info("<< {{}} codecs were declared in {} answer {{}} to {} {{}} >>",
+		logger.info("<< {{}} codecs were declared in {} answer {{}} to {} offer {{}} >>",
 			allMediaFormats, sessionType, answer, sessionType, offer);
 		try {
 			prepareForSessionSetup(callId, sessionType, offer, answer);
