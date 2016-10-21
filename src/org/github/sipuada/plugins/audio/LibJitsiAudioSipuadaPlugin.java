@@ -80,9 +80,9 @@ public class LibJitsiAudioSipuadaPlugin implements SipuadaPlugin {
     public enum SupportedAudioCodec {
 
     	PCMA_8("PCMA", 8, 8000, true),
-    	SPEEX_8("SPEEX", 97, 8000, true),
-    	SPEEX_16("SPEEX", 97, 16000, true),
-    	SPEEX_32("SPEEX", 97, 32000, true);
+    	SPEEX_8("SPEEX", 97, 8000, false),
+    	SPEEX_16("SPEEX", 97, 16000, false),
+    	SPEEX_32("SPEEX", 97, 32000, false);
 
     	private final String encoding;
     	private final int type;
@@ -194,6 +194,7 @@ public class LibJitsiAudioSipuadaPlugin implements SipuadaPlugin {
 		this.identifier = identifier;
 		logger.info("{} sipuada plugin for {} instantiated.",
 			LibJitsiAudioSipuadaPlugin.class.getSimpleName(), identifier);
+        LibJitsi.start();
 	}
 
 	@Override
@@ -759,7 +760,6 @@ public class LibJitsiAudioSipuadaPlugin implements SipuadaPlugin {
 			+ "Role: {{}}\nOffer: {{}}\nAnswer: {{}} ^^",
 			LibJitsiAudioSipuadaPlugin.class.getSimpleName(), callId,
 			roles.get(getSessionKey(callId, type)), offer, answer);
-        LibJitsi.start();
 		MediaService mediaService = LibJitsi.getMediaService();
 		for (SupportedAudioCodec supportedAudioCodec : streams
 				.get(getSessionKey(callId, type)).keySet()) {
@@ -827,43 +827,43 @@ public class LibJitsiAudioSipuadaPlugin implements SipuadaPlugin {
 		records.remove(getSessionKey(callId, type));
 		logger.info("^^ {} performing session tear down in context of call {}... ^^",
 			LibJitsiAudioSipuadaPlugin.class.getSimpleName(), callId);
-		try {
-			for (SupportedAudioCodec supportedAudioCodec : streams
-					.get(getSessionKey(callId, type)).keySet()) {
-				Session session = streams.get(getSessionKey(callId, type))
-					.get(supportedAudioCodec);
-				MediaStream mediaStream = session.getStream();
-				if (mediaStream != null) {
-					logger.info("^^ Should terminate {} *data* stream [{}] from "
-						+ "{}:{} (origin) to {}:{} (destination)! ^^", supportedAudioCodec,
-						mediaStream.getName(), session.getLocalDataAddress(),
-						session.getLocalDataPort(), session.getRemoteDataAddress(),
-						session.getRemoteDataPort());
-					logger.info("^^ Should terminate {} *control* stream [{}] from "
-						+ "{}:{} (origin) to {}:{} (destination)! ^^", supportedAudioCodec,
-						mediaStream.getName(), session.getLocalControlAddress(),
-						session.getLocalControlPort(), session.getRemoteControlAddress(),
-						session.getRemoteControlPort());
-					try {
-						logger.info("^^ Stopping {} stream [{}]... ^^",
-							supportedAudioCodec, mediaStream.getName());
-						mediaStream.stop();
-					} finally {
-						mediaStream.close();
-					}
-					logger.info("^^ {} stream [{}] stopped! ^^",
+		for (SupportedAudioCodec supportedAudioCodec : streams
+				.get(getSessionKey(callId, type)).keySet()) {
+			Session session = streams.get(getSessionKey(callId, type))
+				.get(supportedAudioCodec);
+			MediaStream mediaStream = session.getStream();
+			if (mediaStream != null) {
+				logger.info("^^ Should terminate {} *data* stream [{}] from "
+					+ "{}:{} (origin) to {}:{} (destination)! ^^", supportedAudioCodec,
+					mediaStream.getName(), session.getLocalDataAddress(),
+					session.getLocalDataPort(), session.getRemoteDataAddress(),
+					session.getRemoteDataPort());
+				logger.info("^^ Should terminate {} *control* stream [{}] from "
+					+ "{}:{} (origin) to {}:{} (destination)! ^^", supportedAudioCodec,
+					mediaStream.getName(), session.getLocalControlAddress(),
+					session.getLocalControlPort(), session.getRemoteControlAddress(),
+					session.getRemoteControlPort());
+				try {
+					logger.info("^^ Stopping {} stream [{}]... ^^",
 						supportedAudioCodec, mediaStream.getName());
+					mediaStream.stop();
+				} finally {
+					mediaStream.close();
 				}
+				logger.info("^^ {} stream [{}] stopped! ^^",
+					supportedAudioCodec, mediaStream.getName());
 			}
-			streams.remove(getSessionKey(callId, type));
-		} finally {
-			LibJitsi.stop();
 		}
+		streams.remove(getSessionKey(callId, type));
 		return true;
 	}
 
 	private String getSessionKey(String callId, SessionType type) {
 		return String.format(Locale.US, "%s_(%s)", callId, type);
+	}
+
+	public void stopPlugin() {
+		LibJitsi.stop();
 	}
 
 }
