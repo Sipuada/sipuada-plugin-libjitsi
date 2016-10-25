@@ -42,6 +42,7 @@ import android.javax.sdp.MediaDescription;
 import android.javax.sdp.SdpConstants;
 import android.javax.sdp.SdpException;
 import android.javax.sdp.SdpFactory;
+import android.javax.sdp.SdpParseException;
 import android.javax.sdp.SessionDescription;
 
 public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
@@ -81,24 +82,24 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 
     public enum SupportedMediaCodec {
 
-    	PCMA_8("PCMA", 8, 8000, true, MediaType.AUDIO),
-    	SPEEX_8("SPEEX", 97, 8000, false, MediaType.AUDIO),
-    	SPEEX_16("SPEEX", 97, 16000, false, MediaType.AUDIO),
-    	SPEEX_32("SPEEX", 97, 32000, false, MediaType.AUDIO);
+    	PCMA_8("PCMA", 8, 8000, MediaType.AUDIO, false),
+    	SPEEX_8("SPEEX", 97, 8000, MediaType.AUDIO, false),
+    	SPEEX_16("SPEEX", 97, 16000, MediaType.AUDIO, true),
+    	SPEEX_32("SPEEX", 97, 32000, MediaType.AUDIO, false);
 
     	private final String encoding;
     	private final int type;
     	private final int clockRate;
-    	private final boolean enabled;
     	private final MediaType mediaType;
+    	private final boolean enabled;
 
     	private SupportedMediaCodec(String encoding, int type,
-        		int clockRate, boolean enabled, MediaType mediaType) {
+        		int clockRate, MediaType mediaType, boolean enabled) {
         	this.encoding = encoding;
     		this.type = type;
     		this.clockRate = clockRate;
-    		this.enabled = enabled;
     		this.mediaType = mediaType;
+    		this.enabled = enabled;
     	}
 
     	public String getEncoding() {
@@ -113,16 +114,16 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 			return clockRate;
 		}
 
-		public boolean isEnabled() {
-			return enabled;
-		}
-
 		public String getRtpmap() {
 			return String.format(Locale.US, "%s/%d", encoding, clockRate);
 		}
 
 		public MediaType getMediaType() {
 			return mediaType;
+		}
+
+		public boolean isEnabled() {
+			return enabled;
 		}
 
 		public static List<SupportedMediaCodec> getAudioCodecs() {
@@ -156,12 +157,14 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
     	private final int remoteDataPort;
     	private final String remoteControlAddress;
     	private final int remoteControlPort;
+    	private MediaDirection direction;
     	private MediaStream stream;
 
     	public Session(String localDataAddress, int localDataPort,
     			String localControlAddress, int localControlPort,
     			String remoteDataAddress, int remoteDataPort,
-    			String remoteControlAddress, int remoteControlPort) {
+    			String remoteControlAddress, int remoteControlPort,
+    			MediaDirection direction) {
 			super();
 			this.localDataAddress = localDataAddress;
 			this.localDataPort = localDataPort;
@@ -171,6 +174,7 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 			this.remoteDataPort = remoteDataPort;
 			this.remoteControlAddress = remoteControlAddress;
 			this.remoteControlPort = remoteControlPort;
+			this.direction = direction;
 		}
 
 		public String getLocalDataAddress() {
@@ -203,6 +207,14 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 
 		public int getRemoteControlPort() {
 			return remoteControlPort;
+		}
+
+		public MediaDirection getDirection() {
+			return direction;
+		}
+
+		public void setDirection(MediaDirection direction) {
+			this.direction = direction;
 		}
 
 		public MediaStream getStream() {
@@ -454,15 +466,35 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 			if (!mediaCodec.isEnabled()) {
 				continue;
 			}
+			//TODO remove those 3 lines above, but not before we update
+			//Sipuada to understand that Answer SDPs will no longer be null
+			//if Offer SDPs are non null in case the answerer wants to deny
+			//all media streams and codecs, as each offered media stream/codec
+			//entry will be repeated in the SDP but with the associated
+			//port set to ZERO to indicate this.
 			for (MediaDescription mediaDescription : offerMediaDescriptions) {
 				Vector<AttributeField> attributeFields
 					= ((MediaDescription) mediaDescription).getAttributes(false);
+				boolean sendReceive = false, sendOnly = false, receiveOnly = false;
+				for (AttributeField attributeField : attributeFields) {
+					if (attributeField.getValue() == null
+							|| attributeField.getValue().trim().isEmpty()) {
+						continue;
+					}
+					String directionField = attributeField.getValue().trim().toLowerCase();
+					if (directionField.equals("sendrecv")) {
+						sendReceive = true;
+					} else if (directionField.equals("sendonly")) {
+						receiveOnly = true;
+					} else if (directionField.equals("recvonly")) {
+						sendOnly = true;
+					}
+				}
 				for (AttributeField attributeField : attributeFields) {
 					if (attributeField.getName().equals(SdpConstants.RTPMAP)) {
 						int type = Integer.parseInt(attributeField.getValue()
 							.split(" ")[0].trim());
-						String rtpmap = attributeField.getValue()
-							.split(" ")[1].trim();
+						String rtpmap = attributeField.getValue().split(" ")[1].trim();
 						if ((type >= 0 && type <= 34 && type == mediaCodec.getType())
 								|| rtpmap.toUpperCase().trim().equals(mediaCodec.getRtpmap())) {
 							String codecType = Integer.toString(type);
@@ -481,18 +513,54 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 							mediaField.setMedia(mediaType.name().toLowerCase());
 							mediaField.setMediaType(mediaType.name().toLowerCase());
 							mediaField.setProtocol(SdpConstants.RTP_AVP);
-							int localPort = new Random().nextInt
-								((32767 - 16384)) + 16384;
+							SupportedMediaCodec supportedMediaCodec = null;
+							for (SupportedMediaCodec audioCodec
+									: SupportedMediaCodec.getAudioCodecs()) {
+								if (!audioCodec.isEnabled()) {
+									continue;
+								}
+								if (audioCodec.getRtpmap().toLowerCase().equals
+									(rtpmap.toLowerCase().trim())) {
+									supportedMediaCodec = audioCodec;
+									break;
+								}
+							}
+							for (SupportedMediaCodec videoCodec
+									: SupportedMediaCodec.getVideoCodecs()) {
+								if (!videoCodec.isEnabled()) {
+									continue;
+								}
+								if (videoCodec.getRtpmap().toLowerCase().equals
+									(rtpmap.toLowerCase().trim())) {
+									supportedMediaCodec = videoCodec;
+									break;
+								}
+							}
+							logger.debug("<< {} is the supported codec! >>",
+								supportedMediaCodec);
+							final int localPort;
+							if (supportedMediaCodec != null) {
+								localPort = new Random().nextInt((32767 - 16384)) + 16384;
+								AttributeField rtcpAttribute = createRtcpField
+									(localAddress, localPort + 1);
+								cloneMediaDescription.addAttribute(rtcpAttribute);
+								final AttributeField directionAttribute = new AttributeField();
+								if (sendReceive) {
+									directionAttribute.setValue("sendrecv");
+								} else if (receiveOnly) {
+									directionAttribute.setValue("recvonly");
+								} else if (sendOnly) {
+									directionAttribute.setValue("sendonly");
+								} else {
+									directionAttribute.setValue("sendrecv");
+								}
+								cloneMediaDescription.addAttribute(directionAttribute);
+							} else {
+								localPort = 0;
+							}
 							mediaField.setPort(localPort);
 							((MediaDescriptionImpl) cloneMediaDescription)
 								.setMediaField(mediaField);
-							AttributeField rtcpAttribute = createRtcpField
-								(localAddress, localPort + 1);
-							cloneMediaDescription.addAttribute(rtcpAttribute);
-							AttributeField sendReceiveAttribute
-								= new AttributeField();
-							sendReceiveAttribute.setValue("sendrecv");
-							cloneMediaDescription.addAttribute(sendReceiveAttribute);
 							ConnectionField connectionField
 								= createConnectionField(localAddress);
 							cloneMediaDescription.setConnection(connectionField);
@@ -507,7 +575,8 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 	interface ExtractionCallback {
 
 		void onConnectionInfoExtracted(String dataAddress, int dataPort,
-			String controlAddress, int controlPort, String rtpmap, int codecType);
+			String controlAddress, int controlPort, String rtpmap,
+			int codecType, MediaDirection direction);
 
 		void onExtractionIgnored(String rtpmap, int codecType);
 
@@ -534,7 +603,7 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 		@Override
 		public abstract void onConnectionInfoExtracted(String dataAddress,
 			int dataPort, String controlAddress, int controlPort,
-			String rtpmap, int codecType);
+			String rtpmap, int codecType, MediaDirection direction);
 
 		@Override
 		public final void onExtractionIgnored(String rtpmap, int codecType) {
@@ -583,7 +652,7 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 			public void onConnectionInfoExtracted(final String answerDataAddress,
 					final int answerDataPort, final String answerControlAddress,
 					final int answerControlPort, final String answerRtpmap,
-					final int answerCodecType) {
+					final int answerCodecType, final MediaDirection answerDirection) {
 				extractConnectionInformation(offer, new ExtractionCallbackImpl
 						(CallRole.CALLER.toString(), "OFFER") {
 
@@ -591,7 +660,7 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 					public void onConnectionInfoExtracted(final String offerDataAddress,
 							final int offerDataPort, final String offerControlAddress,
 							final int offerControlPort, final String offerRtpmap,
-							final int offerCodecType) {
+							final int offerCodecType, final MediaDirection offerDirection) {
 						if (offerRtpmap.toLowerCase().trim().equals
 								(answerRtpmap.toLowerCase().trim())) {
 							SupportedMediaCodec supportedMediaCodec = null;
@@ -617,6 +686,8 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 									break;
 								}
 							}
+							logger.debug("%% {} is the supported codec! %%",
+								supportedMediaCodec);
 							if (supportedMediaCodec == null) {
 								logger.error("%% {} FOUND A CODEC MATCH but said codec"
 									+ " {} is not supported by this plugin!(?!) %%",
@@ -638,16 +709,16 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 										(supportedMediaCodec, new Session(offerDataAddress,
 										offerDataPort, offerControlAddress, offerControlPort,
 										answerDataAddress, answerDataPort, answerControlAddress,
-										answerControlPort));
+										answerControlPort, offerDirection));
 									break;
 								case CALLEE:
 									streams.get(getSessionKey(callId, type)).put
 										(supportedMediaCodec, new Session(answerDataAddress,
 										answerDataPort, answerControlAddress, answerControlPort,
 										offerDataAddress, offerDataPort, offerControlAddress,
-										offerControlPort));
+										offerControlPort, answerDirection));
 									break;
-								}
+							}
 						}
 					}
 
@@ -707,6 +778,23 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 		for (MediaDescription mediaDescription : mediaDescriptions) {
 			Vector<AttributeField> attributeFields
 				= ((MediaDescription) mediaDescription).getAttributes(false);
+			MediaDirection direction = MediaDirection.SENDRECV;
+			for (AttributeField attributeField : attributeFields) {
+				try {
+					if (attributeField.getValue() == null
+							|| attributeField.getValue().trim().isEmpty()) {
+						continue;
+					}
+					String directionField = attributeField.getValue().trim().toLowerCase();
+					if (directionField.equals("sendrecv")) {
+						direction = MediaDirection.SENDRECV;
+					} else if (directionField.equals("sendonly")) {
+						direction = MediaDirection.SENDONLY;
+					} else if (directionField.equals("recvonly")) {
+						direction = MediaDirection.RECVONLY;
+					}
+				} catch (SdpParseException ignore) {}
+			}
 			for (AttributeField attributeField : attributeFields) {
 				try {
 					logger.debug("%% Parsing attribute field line: {{}}... %%",
@@ -759,7 +847,7 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 							: Integer.parseInt(parentControlPort) : Integer
 							.parseInt(possibleControlConnection.split("\\:")[1]);
 						callback.onConnectionInfoExtracted(dataAddress, dataPort,
-							controlAddress, controlPort,rtpmap, codecType);
+							controlAddress, controlPort,rtpmap, codecType, direction);
 					}
 				} catch (Throwable anyIssue) {
 					callback.onExtractionPartiallyFailed(anyIssue);
@@ -828,44 +916,61 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 			final String streamName = UUID.randomUUID().toString();
 			Session session = streams.get(getSessionKey(callId, type))
 				.get(supportedMediaCodec);
-			logger.info("^^ Should setup a {} *data* stream [{}] from "
-				+ "{}:{} (origin) to {}:{} (destination)! ^^", supportedMediaCodec,
-				streamName, session.getLocalDataAddress(), session.getLocalDataPort(),
-				session.getRemoteDataAddress(), session.getRemoteDataPort());
-			logger.info("^^ Should setup a {} *control* stream [{}] from "
-				+ "{}:{} (origin) to {}:{} (destination)! ^^", supportedMediaCodec,
-				streamName, session.getLocalControlAddress(),
-				session.getLocalControlPort(), session.getRemoteControlAddress(),
-				session.getRemoteControlPort());
 			MediaDevice device = mediaService.getDefaultDevice
 				(supportedMediaCodec.getMediaType(), MediaUseCase.CALL);
 			MediaStream mediaStream = mediaService
 				.createMediaStream(device);
 			mediaStream.setName(streamName);
-			mediaStream.setDirection(MediaDirection.SENDRECV);
-			MediaFormat mediaFormat = mediaService.getFormatFactory()
-				.createMediaFormat(supportedMediaCodec.getEncoding(),
-				supportedMediaCodec.getClockRate());
-			mediaStream.setFormat(mediaFormat);
-			try {
-				StreamConnector connector = new DefaultStreamConnector
-					(new DatagramSocket(session.getLocalDataPort(),
-						InetAddress.getByName(session.getLocalDataAddress())),
-					new DatagramSocket(session.getLocalControlPort(),
-						InetAddress.getByName(session.getLocalControlAddress())));
-				mediaStream.setConnector(connector);
-				MediaStreamTarget target = new MediaStreamTarget
-					(new InetSocketAddress(session.getRemoteDataAddress(),
-						session.getRemoteDataPort()),
-					(new InetSocketAddress(session.getRemoteControlAddress(),
-						session.getRemoteControlPort())));
-				mediaStream.setTarget(target);
+			MediaDirection mediaDirection = session.getDirection();
+			switch (roles.get(getSessionKey(callId, type))) {
+				case CALLER:
+					if (session.getRemoteDataPort() == 0) {
+						mediaDirection = MediaDirection.INACTIVE;
+					}
+					break;
+				case CALLEE:
+					if (session.getLocalDataPort() == 0) {
+						mediaDirection = MediaDirection.INACTIVE;
+					}
+					break;
+			}
+			mediaStream.setDirection(mediaDirection);
+			if (mediaDirection != MediaDirection.INACTIVE) {
+				logger.info("^^ Should setup a {} *data* stream [{}] from "
+					+ "{}:{} (origin) to {}:{} (destination)! ^^", supportedMediaCodec,
+					streamName, session.getLocalDataAddress(), session.getLocalDataPort(),
+					session.getRemoteDataAddress(), session.getRemoteDataPort());
+				logger.info("^^ Should setup a {} *control* stream [{}] from "
+					+ "{}:{} (origin) to {}:{} (destination)! ^^", supportedMediaCodec,
+					streamName, session.getLocalControlAddress(),
+					session.getLocalControlPort(), session.getRemoteControlAddress(),
+					session.getRemoteControlPort());
+				MediaFormat mediaFormat = mediaService.getFormatFactory()
+					.createMediaFormat(supportedMediaCodec.getEncoding(),
+					supportedMediaCodec.getClockRate());
+				mediaStream.setFormat(mediaFormat);
+				try {
+					StreamConnector connector = new DefaultStreamConnector
+						(new DatagramSocket(session.getLocalDataPort(),
+							InetAddress.getByName(session.getLocalDataAddress())),
+						new DatagramSocket(session.getLocalControlPort(),
+							InetAddress.getByName(session.getLocalControlAddress())));
+					mediaStream.setConnector(connector);
+					MediaStreamTarget target = new MediaStreamTarget
+						(new InetSocketAddress(session.getRemoteDataAddress(),
+							session.getRemoteDataPort()),
+						(new InetSocketAddress(session.getRemoteControlAddress(),
+							session.getRemoteControlPort())));
+					mediaStream.setTarget(target);
+					session.setStream(mediaStream);
+				} catch (Throwable anyIssue) {
+					logger.info("^^ Could not setup {} *data* stream [{}]! ^^",
+						supportedMediaCodec, streamName);
+					logger.info("^^ Could not setup {} *control* stream [{}]! ^^",
+						supportedMediaCodec, streamName, anyIssue);
+				}
+			} else {
 				session.setStream(mediaStream);
-			} catch (Throwable anyIssue) {
-				logger.info("^^ Could not setup {} *data* stream [{}]! ^^",
-					supportedMediaCodec, streamName);
-				logger.info("^^ Could not setup {} *control* stream [{}]! ^^",
-					supportedMediaCodec, streamName, anyIssue);
 			}
 		}
 		for (SupportedMediaCodec supportedMediaCodec : streams
@@ -873,7 +978,8 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 			Session session = streams.get(getSessionKey(callId, type))
 				.get(supportedMediaCodec);
 			MediaStream mediaStream = session.getStream();
-			if (mediaStream != null) {
+			if (mediaStream != null
+					&& mediaStream.getDirection() != MediaDirection.INACTIVE) {
 				logger.info("^^ Starting {} *data* stream [{}]! ^^",
 					supportedMediaCodec, mediaStream.getName());
 				logger.info("^^ Starting {} *control* stream [{}]! ^^",
