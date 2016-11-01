@@ -81,9 +81,9 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 
     public enum SupportedMediaCodec {
 
-    	PCMA_8("PCMA", 8, 8000, MediaType.AUDIO, false),
+    	PCMA_8("PCMA", 8, 8000, MediaType.AUDIO, true),
     	SPEEX_8("SPEEX", 97, 8000, MediaType.AUDIO, false),
-    	SPEEX_16("SPEEX", 97, 16000, MediaType.AUDIO, true),
+    	SPEEX_16("SPEEX", 97, 16000, MediaType.AUDIO, false),
     	SPEEX_32("SPEEX", 97, 32000, MediaType.AUDIO, false);
 
     	private final String encoding;
@@ -226,6 +226,7 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 
     }
     private final Map<String, Map<SupportedMediaCodec, Session>> streams = new HashMap<>();
+    private final Map<String, Boolean> startedStreams = new HashMap<>();
 
     private final String identifier;
 
@@ -988,12 +989,14 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 				mediaStream.start();
 			}
 		}
+		startedStreams.put(getSessionKey(callId, type), true);
 		return true;
 	}
 
 	@Override
 	public boolean isSessionOngoing(String callId, SessionType type) {
-		return streams.containsKey(getSessionKey(callId, type));
+		return startedStreams.containsKey(getSessionKey(callId, type))
+			&& startedStreams.get(getSessionKey(callId, type));
 	}
 
 	@Override
@@ -1030,6 +1033,7 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 			}
 		}
 		streams.remove(getSessionKey(callId, type));
+		startedStreams.put(getSessionKey(callId, type), false);
 		return true;
 	}
 
