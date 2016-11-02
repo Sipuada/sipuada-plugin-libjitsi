@@ -476,7 +476,7 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 			for (MediaDescription mediaDescription : offerMediaDescriptions) {
 				Vector<AttributeField> attributeFields
 					= ((MediaDescription) mediaDescription).getAttributes(false);
-				boolean sendReceive = false, sendOnly = false, receiveOnly = false;
+				boolean sendReceive = false, sendOnly = false, receiveOnly = false, inactive = false;
 				for (AttributeField attributeField : attributeFields) {
 					if (attributeField.getValue() == null
 							|| attributeField.getValue().trim().isEmpty()) {
@@ -489,6 +489,8 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 						receiveOnly = true;
 					} else if (directionField.equals("recvonly")) {
 						sendOnly = true;
+					} else if (directionField.equals("inactive")) {
+						inactive = true;
 					}
 				}
 				for (AttributeField attributeField : attributeFields) {
@@ -552,6 +554,8 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 									directionAttribute.setValue("recvonly");
 								} else if (sendOnly) {
 									directionAttribute.setValue("sendonly");
+								} else if (inactive) {
+									directionAttribute.setValue("inactive");
 								} else {
 									directionAttribute.setValue("sendrecv");
 								}
@@ -793,6 +797,8 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 						direction = MediaDirection.SENDONLY;
 					} else if (directionField.equals("recvonly")) {
 						direction = MediaDirection.RECVONLY;
+					} else if (directionField.equals("inactive")) {
+						direction = MediaDirection.INACTIVE;
 					}
 				} catch (SdpParseException ignore) {}
 			}
@@ -923,21 +929,20 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 			MediaStream mediaStream = mediaService
 				.createMediaStream(device);
 			mediaStream.setName(streamName);
-			MediaDirection mediaDirection = session.getDirection();
+			boolean streamIsRejected = false;
 			switch (roles.get(getSessionKey(callId, type))) {
 				case CALLER:
 					if (session.getRemoteDataPort() == 0) {
-						mediaDirection = MediaDirection.INACTIVE;
+						streamIsRejected = true;
 					}
 					break;
 				case CALLEE:
 					if (session.getLocalDataPort() == 0) {
-						mediaDirection = MediaDirection.INACTIVE;
+						streamIsRejected = true;
 					}
 					break;
 			}
-			mediaStream.setDirection(mediaDirection);
-			if (mediaDirection != MediaDirection.INACTIVE) {
+			if (!streamIsRejected) {
 				logger.info("^^ Should setup a {} *data* stream [{}] from "
 					+ "{}:{} (origin) to {}:{} (destination)! ^^", supportedMediaCodec,
 					streamName, session.getLocalDataAddress(), session.getLocalDataPort(),
