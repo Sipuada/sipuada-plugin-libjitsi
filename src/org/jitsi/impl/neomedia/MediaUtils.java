@@ -19,7 +19,7 @@ import java.util.*;
 
 import javax.media.*;
 import javax.media.format.*;
-import javax.sdp.*;
+import android.javax.sdp.*;
 
 import org.jitsi.impl.neomedia.codec.*;
 import org.jitsi.impl.neomedia.codec.video.h264.*;

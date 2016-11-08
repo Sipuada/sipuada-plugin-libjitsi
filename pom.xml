@@ -50,11 +50,6 @@
     </dependency>
     <dependency>
       <groupId>${project.groupId}</groupId>
-      <artifactId>ice4j</artifactId>
-      <version>1.1-20160817.183530-15</version>
-    </dependency>
-    <dependency>
-      <groupId>${project.groupId}</groupId>
       <artifactId>jitsi-lgpl-dependencies</artifactId>
       <optional>true</optional>
       <version>1.0-20150723.002855-1</version>

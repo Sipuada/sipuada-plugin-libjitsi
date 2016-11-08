@@ -1,8 +1,10 @@
 package org.github.sipuada.plugins.audio;
 
+import java.io.IOException;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -14,6 +16,13 @@ import java.util.Vector;
 
 import org.github.sipuada.SipUserAgent;
 import org.github.sipuada.plugins.SipuadaPlugin;
+import org.ice4j.Transport;
+import org.ice4j.TransportAddress;
+import org.ice4j.ice.Agent;
+import org.ice4j.ice.IceMediaStream;
+import org.ice4j.ice.harvest.CandidateHarvester;
+import org.ice4j.ice.harvest.StunCandidateHarvester;
+import org.ice4j.ice.sdp.IceSdpUtils;
 import org.jitsi.service.libjitsi.LibJitsi;
 import org.jitsi.service.neomedia.DefaultStreamConnector;
 import org.jitsi.service.neomedia.MediaDirection;
@@ -28,19 +37,19 @@ import org.jitsi.service.neomedia.format.MediaFormat;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import android.gov.nist.gnjvx.sdp.MediaDescriptionImpl;
-import android.gov.nist.gnjvx.sdp.fields.AttributeField;
-import android.gov.nist.gnjvx.sdp.fields.ConnectionField;
-import android.gov.nist.gnjvx.sdp.fields.MediaField;
-import android.gov.nist.gnjvx.sdp.fields.OriginField;
-import android.gov.nist.gnjvx.sdp.fields.SDPKeywords;
-import android.gov.nist.gnjvx.sdp.fields.SessionNameField;
+import android.gov.nist.javax.sdp.MediaDescriptionImpl;
+import android.gov.nist.javax.sdp.fields.AttributeField;
+import android.gov.nist.javax.sdp.fields.ConnectionField;
+import android.gov.nist.javax.sdp.fields.MediaField;
+import android.gov.nist.javax.sdp.fields.OriginField;
+import android.gov.nist.javax.sdp.fields.SDPKeywords;
+import android.gov.nist.javax.sdp.fields.SessionNameField;
 import android.javax.sdp.Connection;
 import android.javax.sdp.Media;
 import android.javax.sdp.MediaDescription;
 import android.javax.sdp.SdpConstants;
 import android.javax.sdp.SdpException;
-import android.javax.sdp.SdpFactory;
+import android.javax.sdp.SdpFactoryImpl;
 import android.javax.sdp.SdpParseException;
 import android.javax.sdp.SessionDescription;
 
@@ -228,6 +237,10 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
     private final Map<String, Map<SupportedMediaCodec, Session>> streams = new HashMap<>();
     private final Map<String, Boolean> startedStreams = new HashMap<>();
 
+    private final Map<String, Agent> iceAgents = new HashMap<>();
+    private CandidateHarvester stunHarvester;
+    private CandidateHarvester turnHarvester;
+
     private final String identifier;
 
 	public LibJitsiMediaSipuadaPlugin(String identifier) {
@@ -235,6 +248,7 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 		logger.info("{} sipuada plugin for {} instantiated.",
 			LibJitsiMediaSipuadaPlugin.class.getSimpleName(), identifier);
         LibJitsi.start();
+		logger.info("LibJitsi process started!");
 	}
 
 	@Override
@@ -244,6 +258,7 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 			roles.put(getSessionKey(callId, type),  CallRole.CALLER);
 		}
 		try {
+			Agent iceAgent = createOrFetchExistingAgent(callId, localAddress);
 			SessionDescription offer = createSdpOffer(localAddress);
 			for (SessionType type : SessionType.values()) {
 				records.put(getSessionKey(callId, type), new Record(offer));
@@ -251,7 +266,7 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 					LibJitsiMediaSipuadaPlugin.class.getSimpleName(), type, offer, callId);
 			}
 			try {
-				return includeOfferedMediaTypes(offer, localAddress);
+				return includeOfferedMediaTypes(offer, localAddress, iceAgent);
 			} catch (Throwable anyIssue) {
     			logger.error("{} could not include supported media types into "
 					+ "offer {{}} in context of call invitation {}...",
@@ -290,6 +305,7 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 		logger.debug("===*** generateAnswer -> {}", getSessionKey(callId, type));
         roles.put(getSessionKey(callId, type), CallRole.CALLEE);
         try {
+			Agent iceAgent = createOrFetchExistingAgent(callId, localAddress);
     		SessionDescription answer = createSdpAnswer(offer, localAddress);
     		records.put(getSessionKey(callId, type), new Record(offer, answer));
     		logger.info("{} generating {} answer {{}} to {} offer {{}} in context "
@@ -297,7 +313,8 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
     			LibJitsiMediaSipuadaPlugin.class.getSimpleName(),
     			type, answer, type, offer, callId);
     		try {
-        		return includeAcceptedMediaTypes(callId, type, answer, offer, localAddress);
+        		return includeAcceptedMediaTypes(callId, type,
+    				answer, offer, localAddress);
     		} catch (Throwable anyIssue) {
     			logger.error("{} could not include accepted media types "
 					+ "into {} answer {{}} to {} offer {{}} in context of call invitation"
@@ -313,6 +330,37 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
         }
 	}
 
+	private Agent createOrFetchExistingAgent(String callId, String localAddress) {
+		Agent iceAgent = iceAgents.get(callId);
+		if (iceAgent == null) {
+			iceAgent = new Agent(localAddress);
+			iceAgent.setUseHostHarvester(true);
+			turnHarvester = createTurnHarvester(localAddress);
+			if (turnHarvester != null) {
+				iceAgent.addCandidateHarvester(turnHarvester);
+			}
+			stunHarvester = createStunHarvester(localAddress);
+			if (stunHarvester != null) {
+				iceAgent.addCandidateHarvester(stunHarvester);
+			}
+			iceAgents.put(callId, iceAgent);
+		}
+		return iceAgent;
+	}
+
+	private CandidateHarvester createTurnHarvester(String localAddress) {
+		return null;
+	}
+
+	private CandidateHarvester createStunHarvester(String localAddress) {
+    	try {
+			return new StunCandidateHarvester(new TransportAddress
+				(InetAddress.getByName("stun.siplogin.de"), 3478, Transport.UDP));
+		} catch (UnknownHostException stunServerUnavailable) {
+	    	return null;
+		}		
+	}
+
 	private SessionDescription createSdpOffer(String localAddress)
 			throws SdpException {
 		return createSdp(localAddress, System.currentTimeMillis() / 1000, 0L, "-");
@@ -326,7 +374,7 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 
 	private SessionDescription createSdp(String localAddress, long sessionId,
 			long sessionVersion, String sessionName) throws SdpException {
-		SessionDescription sdp = SdpFactory.getInstance()
+		SessionDescription sdp = SdpFactoryImpl.getInstance()
 			.createSessionDescription(localAddress);
 		OriginField originField = createOriginField(sessionId,
 			sessionVersion, localAddress);
@@ -365,13 +413,13 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 	}
 
 	private SessionDescription includeOfferedMediaTypes(SessionDescription offer,
-			String localAddress) throws SdpException {
+			String localAddress, Agent iceAgent) throws SdpException {
 		Vector<String> allMediaFormats = new Vector<>();
 		Vector<MediaDescription> mediaDescriptions = new Vector<>();
-		generateOfferMediaDescriptions(MediaType.AUDIO,
-			allMediaFormats, mediaDescriptions, localAddress);
-		generateOfferMediaDescriptions(MediaType.VIDEO,
-			allMediaFormats, mediaDescriptions, localAddress);
+		generateOfferMediaDescriptions(MediaType.AUDIO, allMediaFormats,
+			mediaDescriptions, localAddress, iceAgent);
+		generateOfferMediaDescriptions(MediaType.VIDEO, allMediaFormats,
+			mediaDescriptions, localAddress, iceAgent);
 		offer.setMediaDescriptions(mediaDescriptions);
 		logger.info("<< {{}} codecs were declared in offer {{}} >>",
 			allMediaFormats, offer);
@@ -379,7 +427,8 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 	}
 
 	private void generateOfferMediaDescriptions(MediaType mediaType, Vector<String> allMediaFormats,
-			Vector<MediaDescription> mediaDescriptions, String localAddress) throws SdpException {
+			Vector<MediaDescription> mediaDescriptions, String localAddress, Agent iceAgent)
+			throws SdpException {
 		for (SupportedMediaCodec mediaCodec : (mediaType == MediaType.AUDIO
 				? SupportedMediaCodec.getAudioCodecs() : SupportedMediaCodec.getVideoCodecs())) {
 			if (!mediaCodec.isEnabled()) {
@@ -400,16 +449,25 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 			mediaField.setMedia(mediaType.name().toLowerCase());
 			mediaField.setMediaType(mediaType.name().toLowerCase());
 			mediaField.setProtocol(SdpConstants.RTP_AVP);
-			int localPort = new Random().nextInt((32767 - 16384)) + 16384;
-			mediaField.setPort(localPort);
 			mediaDescription.setMediaField(mediaField);
+			int minPort = 16384;
+			int maxPort = (32767 - 16384);
+			int localPort = new Random().nextInt(maxPort) + minPort;
 			AttributeField rtcpAttribute = createRtcpField(localAddress, localPort + 1);
 			mediaDescription.addAttribute(rtcpAttribute);
+			IceMediaStream mediaStream = iceAgent.createMediaStream(mediaCodec.name());
+			try {
+				iceAgent.createComponent(mediaStream, Transport.UDP,
+					localPort, minPort, minPort + maxPort);
+				iceAgent.createComponent(mediaStream, Transport.UDP,
+					localPort + 1, minPort, minPort + maxPort);
+				IceSdpUtils.initMediaDescription(mediaDescription, mediaStream);
+			} catch (IllegalArgumentException | IOException ignore) {
+				ignore.printStackTrace();
+			}
 			AttributeField sendReceiveAttribute = new AttributeField();
 			sendReceiveAttribute.setValue("sendrecv");
 			mediaDescription.addAttribute(sendReceiveAttribute);
-			ConnectionField connectionField = createConnectionField(localAddress);
-			mediaDescription.setConnection(connectionField);
 			mediaDescriptions.add(mediaDescription);
 		}
 	}
@@ -541,9 +599,11 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 							}
 							logger.debug("<< {} is the supported codec! >>",
 								supportedMediaCodec);
+							int minPort = 16384;
+							int maxPort = (32767 - 16384);
 							final int localPort;
 							if (supportedMediaCodec != null) {
-								localPort = new Random().nextInt((32767 - 16384)) + 16384;
+								localPort = new Random().nextInt(maxPort) + minPort;
 								AttributeField rtcpAttribute = createRtcpField
 									(localAddress, localPort + 1);
 								cloneMediaDescription.addAttribute(rtcpAttribute);
