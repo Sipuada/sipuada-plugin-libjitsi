@@ -266,7 +266,7 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 					LibJitsiMediaSipuadaPlugin.class.getSimpleName(), type, offer, callId);
 			}
 			try {
-				return includeOfferedMediaTypes(offer, localAddress, iceAgent);
+				return includeOfferedMediaTypes(offer, iceAgent);
 			} catch (Throwable anyIssue) {
     			logger.error("{} could not include supported media types into "
 					+ "offer {{}} in context of call invitation {}...",
@@ -313,8 +313,7 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
     			LibJitsiMediaSipuadaPlugin.class.getSimpleName(),
     			type, answer, type, offer, callId);
     		try {
-        		return includeAcceptedMediaTypes(callId, type,
-    				answer, offer, localAddress);
+        		return includeAcceptedMediaTypes(callId, type, answer, offer, iceAgent);
     		} catch (Throwable anyIssue) {
     			logger.error("{} could not include accepted media types "
 					+ "into {} answer {{}} to {} offer {{}} in context of call invitation"
@@ -413,21 +412,22 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 	}
 
 	private SessionDescription includeOfferedMediaTypes(SessionDescription offer,
-			String localAddress, Agent iceAgent) throws SdpException {
+			Agent iceAgent) throws SdpException {
 		Vector<String> allMediaFormats = new Vector<>();
 		Vector<MediaDescription> mediaDescriptions = new Vector<>();
-		generateOfferMediaDescriptions(MediaType.AUDIO, allMediaFormats,
-			mediaDescriptions, localAddress, iceAgent);
-		generateOfferMediaDescriptions(MediaType.VIDEO, allMediaFormats,
-			mediaDescriptions, localAddress, iceAgent);
+		generateOfferMediaDescriptions(MediaType.AUDIO,
+			allMediaFormats, mediaDescriptions, iceAgent);
+		generateOfferMediaDescriptions(MediaType.VIDEO,
+			allMediaFormats, mediaDescriptions, iceAgent);
 		offer.setMediaDescriptions(mediaDescriptions);
+		IceSdpUtils.initSessionDescription(offer, iceAgent);
 		logger.info("<< {{}} codecs were declared in offer {{}} >>",
 			allMediaFormats, offer);
 		return offer;
 	}
 
 	private void generateOfferMediaDescriptions(MediaType mediaType, Vector<String> allMediaFormats,
-			Vector<MediaDescription> mediaDescriptions, String localAddress, Agent iceAgent)
+			Vector<MediaDescription> mediaDescriptions, Agent iceAgent)
 			throws SdpException {
 		for (SupportedMediaCodec mediaCodec : (mediaType == MediaType.AUDIO
 				? SupportedMediaCodec.getAudioCodecs() : SupportedMediaCodec.getVideoCodecs())) {
@@ -453,9 +453,8 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 			int minPort = 16384;
 			int maxPort = (32767 - 16384);
 			int localPort = new Random().nextInt(maxPort) + minPort;
-			AttributeField rtcpAttribute = createRtcpField(localAddress, localPort + 1);
-			mediaDescription.addAttribute(rtcpAttribute);
-			IceMediaStream mediaStream = iceAgent.createMediaStream(mediaCodec.name());
+			IceMediaStream mediaStream = iceAgent
+				.createMediaStream(mediaCodec.getEncoding());
 			try {
 				iceAgent.createComponent(mediaStream, Transport.UDP,
 					localPort, minPort, minPort + maxPort);
@@ -483,8 +482,8 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 
 	@SuppressWarnings("unchecked")
 	private SessionDescription includeAcceptedMediaTypes(String callId,
-			SessionType sessionType, SessionDescription answer, SessionDescription offer,
-			String localAddress) throws SdpException {
+			SessionType sessionType, SessionDescription answer,
+			SessionDescription offer, Agent iceAgent) throws SdpException {
 		Vector<MediaDescription> offerMediaDescriptions = offer
 			.getMediaDescriptions(false);
 		if (offerMediaDescriptions == null || offerMediaDescriptions.isEmpty()) {
@@ -493,13 +492,14 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 		Vector<String> allMediaFormats = new Vector<>();
 		Vector<MediaDescription> answerMediaDescriptions = new Vector<>();
 		generateAnswerMediaDescriptions(MediaType.AUDIO, offerMediaDescriptions,
-			allMediaFormats, answerMediaDescriptions, localAddress);
+			allMediaFormats, answerMediaDescriptions, iceAgent);
 		generateAnswerMediaDescriptions(MediaType.VIDEO, offerMediaDescriptions,
-			allMediaFormats, answerMediaDescriptions, localAddress);
+			allMediaFormats, answerMediaDescriptions, iceAgent);
 		if (answerMediaDescriptions.isEmpty()) {
 			return null;
 		}
 		answer.setMediaDescriptions(answerMediaDescriptions);
+		IceSdpUtils.initSessionDescription(answer, iceAgent);
 		logger.info("<< {{}} codecs were declared in {} answer {{}} to {} offer {{}} >>",
 			allMediaFormats, sessionType, answer, sessionType, offer);
 		try {
@@ -515,10 +515,8 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 
 	@SuppressWarnings("unchecked")
 	private void generateAnswerMediaDescriptions(MediaType mediaType,
-			Vector<MediaDescription> offerMediaDescriptions,
-			Vector<String> allMediaFormats,
-			Vector<MediaDescription> answerMediaDescriptions,
-			String localAddress) throws SdpException {
+			Vector<MediaDescription> offerMediaDescriptions, Vector<String> allMediaFormats,
+			Vector<MediaDescription> answerMediaDescriptions, Agent iceAgent) throws SdpException {
 		for (SupportedMediaCodec mediaCodec : (mediaType == MediaType.AUDIO
 				? SupportedMediaCodec.getAudioCodecs()
 				: SupportedMediaCodec.getVideoCodecs())) {
@@ -604,9 +602,9 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 							final int localPort;
 							if (supportedMediaCodec != null) {
 								localPort = new Random().nextInt(maxPort) + minPort;
-								AttributeField rtcpAttribute = createRtcpField
-									(localAddress, localPort + 1);
-								cloneMediaDescription.addAttribute(rtcpAttribute);
+//								AttributeField rtcpAttribute = createRtcpField
+//									(localAddress, localPort + 1);
+//								cloneMediaDescription.addAttribute(rtcpAttribute);
 								final AttributeField directionAttribute = new AttributeField();
 								if (sendReceive) {
 									directionAttribute.setValue("sendrecv");
@@ -626,9 +624,9 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 							mediaField.setPort(localPort);
 							((MediaDescriptionImpl) cloneMediaDescription)
 								.setMediaField(mediaField);
-							ConnectionField connectionField
-								= createConnectionField(localAddress);
-							cloneMediaDescription.setConnection(connectionField);
+//							ConnectionField connectionField
+//								= createConnectionField(localAddress);
+//							cloneMediaDescription.setConnection(connectionField);
 							answerMediaDescriptions.add(cloneMediaDescription);
 						}
 					}
