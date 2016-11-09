@@ -3,8 +3,6 @@ package org.github.sipuada.plugins.audio;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.io.IOException;
-import java.net.InetAddress;
-import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -23,7 +21,6 @@ import org.ice4j.ice.Component;
 import org.ice4j.ice.IceMediaStream;
 import org.ice4j.ice.IceProcessingState;
 import org.ice4j.ice.harvest.CandidateHarvester;
-import org.ice4j.ice.harvest.StunCandidateHarvester;
 import org.ice4j.ice.sdp.IceSdpUtils;
 import org.jitsi.service.libjitsi.LibJitsi;
 import org.jitsi.service.neomedia.MediaDirection;
@@ -334,7 +331,7 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 		Agent iceAgent = iceAgents.get(callId);
 		if (iceAgent == null) {
 			iceAgent = new Agent(localAddress);
-			iceAgent.setTrickling(true);
+			iceAgent.setTrickling(false);
 			iceAgent.setUseHostHarvester(true);
 			turnHarvester = createTurnHarvester(localAddress);
 			if (turnHarvester != null) {
@@ -354,12 +351,13 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 	}
 
 	private CandidateHarvester createStunHarvester(String localAddress) {
-    	try {
-			return new StunCandidateHarvester(new TransportAddress
-				(InetAddress.getByName("stun.icchw.jflddns.com.br"), 3478, Transport.UDP));
-		} catch (UnknownHostException stunServerUnavailable) {
+//    	try {
+//			return new StunCandidateHarvester(new TransportAddress
+//				(InetAddress.getByName("131.221.240.71"), 3478, Transport.UDP));
+//		} catch (UnknownHostException stunServerUnavailable) {
+//			stunServerUnavailable.printStackTrace();
 	    	return null;
-		}		
+//		}
 	}
 
 	private SessionDescription createSdpOffer(String localAddress)
@@ -1131,34 +1129,34 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 		records.remove(getSessionKey(callId, type));
 		logger.info("^^ {} performing session tear down in context of call {}... ^^",
 			LibJitsiMediaSipuadaPlugin.class.getSimpleName(), callId);
-		for (SupportedMediaCodec supportedMediaCodec : streams
-				.get(getSessionKey(callId, type)).keySet()) {
-			Session session = streams.get(getSessionKey(callId, type))
-				.get(supportedMediaCodec);
-			MediaStream mediaStream = session.getStream();
-			if (mediaStream != null) {
-				logger.info("^^ Should terminate {} *data* stream [{}] from "
-					+ "{}:{} (origin) to {}:{} (destination)! ^^", supportedMediaCodec,
-					mediaStream.getName(), session.getLocalDataAddress(),
-					session.getLocalDataPort(), session.getRemoteDataAddress(),
-					session.getRemoteDataPort());
-				logger.info("^^ Should terminate {} *control* stream [{}] from "
-					+ "{}:{} (origin) to {}:{} (destination)! ^^", supportedMediaCodec,
-					mediaStream.getName(), session.getLocalControlAddress(),
-					session.getLocalControlPort(), session.getRemoteControlAddress(),
-					session.getRemoteControlPort());
-				try {
-					logger.info("^^ Stopping {} stream [{}]... ^^",
-						supportedMediaCodec, mediaStream.getName());
-					mediaStream.stop();
-				} finally {
-					mediaStream.close();
-				}
-				logger.info("^^ {} stream [{}] stopped! ^^",
-					supportedMediaCodec, mediaStream.getName());
-			}
-		}
-		streams.remove(getSessionKey(callId, type));
+//		for (SupportedMediaCodec supportedMediaCodec : streams
+//				.get(getSessionKey(callId, type)).keySet()) {
+//			Session session = streams.get(getSessionKey(callId, type))
+//				.get(supportedMediaCodec);
+//			MediaStream mediaStream = session.getStream();
+//			if (mediaStream != null) {
+//				logger.info("^^ Should terminate {} *data* stream [{}] from "
+//					+ "{}:{} (origin) to {}:{} (destination)! ^^", supportedMediaCodec,
+//					mediaStream.getName(), session.getLocalDataAddress(),
+//					session.getLocalDataPort(), session.getRemoteDataAddress(),
+//					session.getRemoteDataPort());
+//				logger.info("^^ Should terminate {} *control* stream [{}] from "
+//					+ "{}:{} (origin) to {}:{} (destination)! ^^", supportedMediaCodec,
+//					mediaStream.getName(), session.getLocalControlAddress(),
+//					session.getLocalControlPort(), session.getRemoteControlAddress(),
+//					session.getRemoteControlPort());
+//				try {
+//					logger.info("^^ Stopping {} stream [{}]... ^^",
+//						supportedMediaCodec, mediaStream.getName());
+//					mediaStream.stop();
+//				} finally {
+//					mediaStream.close();
+//				}
+//				logger.info("^^ {} stream [{}] stopped! ^^",
+//					supportedMediaCodec, mediaStream.getName());
+//			}
+//		}
+//		streams.remove(getSessionKey(callId, type));
 		startedStreams.put(getSessionKey(callId, type), false);
 		return true;
 	}
