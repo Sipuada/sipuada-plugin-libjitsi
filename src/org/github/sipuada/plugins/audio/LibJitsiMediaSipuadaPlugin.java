@@ -834,6 +834,12 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 														remoteControlPort, answerDirection));
 													break;
 											}
+											iceAgent.removeStateChangeListener(this);
+											iceAgent.removeStream(mediaStream);
+											if (iceAgent.getStreamCount() == 0) {
+												iceAgents.remove(getSessionKey(callId, type));
+												iceAgent.free();
+											}
 											if (postponedStreams.containsKey(getSessionKey(callId, type))) {
 												performSessionSetup(callId, type, postponedStreams
 													.get(getSessionKey(callId, type)));
