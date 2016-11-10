@@ -3,6 +3,8 @@ package org.github.sipuada.plugins.audio;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -10,17 +12,23 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
 import java.util.Vector;
+import java.util.logging.Level;
 
 import org.github.sipuada.SipUserAgent;
 import org.github.sipuada.plugins.SipuadaPlugin;
 import org.ice4j.Transport;
 import org.ice4j.TransportAddress;
 import org.ice4j.ice.Agent;
+import org.ice4j.ice.Candidate;
 import org.ice4j.ice.CandidatePair;
+import org.ice4j.ice.CandidateType;
 import org.ice4j.ice.Component;
 import org.ice4j.ice.IceMediaStream;
 import org.ice4j.ice.IceProcessingState;
+import org.ice4j.ice.RemoteCandidate;
 import org.ice4j.ice.harvest.CandidateHarvester;
+import org.ice4j.ice.harvest.StunCandidateHarvester;
+import org.ice4j.ice.sdp.CandidateAttribute;
 import org.ice4j.ice.sdp.IceSdpUtils;
 import org.jitsi.service.libjitsi.LibJitsi;
 import org.jitsi.service.neomedia.MediaDirection;
@@ -43,7 +51,6 @@ import android.javax.sdp.SdpException;
 import android.javax.sdp.SdpFactoryImpl;
 import android.javax.sdp.SdpParseException;
 import android.javax.sdp.SessionDescription;
-import test.SdpUtils;
 
 public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 
@@ -280,11 +287,6 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 		Agent iceAgent = iceAgents.get(callId);
 		SessionDescription offer = record.getOffer();
 		record.setAnswer(answer);
-		try {
-			SdpUtils.parseSDP(iceAgent, offer);
-		} catch (Exception ignore) {
-			ignore.printStackTrace();
-		}
 		logger.info("{} received {} answer {{}} to {} offer {{}} in context of call "
 			+ "invitation {}...", LibJitsiMediaSipuadaPlugin.class.getSimpleName(),
 			type, answer, type, offer, callId);
@@ -330,8 +332,8 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 	private Agent createOrFetchExistingAgent(String callId, String localAddress) {
 		Agent iceAgent = iceAgents.get(callId);
 		if (iceAgent == null) {
-			iceAgent = new Agent(localAddress);
-			iceAgent.setTrickling(false);
+			iceAgent = new Agent(Level.ALL, localAddress);
+			iceAgent.setTrickling(true);
 			iceAgent.setUseHostHarvester(true);
 			turnHarvester = createTurnHarvester(localAddress);
 			if (turnHarvester != null) {
@@ -351,13 +353,13 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 	}
 
 	private CandidateHarvester createStunHarvester(String localAddress) {
-//    	try {
-//			return new StunCandidateHarvester(new TransportAddress
-//				(InetAddress.getByName("131.221.240.71"), 3478, Transport.UDP));
-//		} catch (UnknownHostException stunServerUnavailable) {
-//			stunServerUnavailable.printStackTrace();
+    	try {
+			return new StunCandidateHarvester(new TransportAddress
+				(InetAddress.getByName("stun.icchw.jflddns.com.br"), 3478, Transport.UDP));
+		} catch (UnknownHostException stunServerUnavailable) {
+			stunServerUnavailable.printStackTrace();
 	    	return null;
-//		}
+		}
 	}
 
 	private SessionDescription createSdpOffer(String localAddress)
@@ -445,7 +447,7 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 			int maxPort = (32767 - 16384);
 			int localPort = new Random().nextInt(maxPort) + minPort;
 			IceMediaStream mediaStream = iceAgent
-				.createMediaStream(mediaCodec.getEncoding());
+				.createMediaStream(mediaCodec.getRtpmap());
 			try {
 				iceAgent.createComponent(mediaStream, Transport.UDP,
 					localPort, minPort, minPort + maxPort);
@@ -482,11 +484,6 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 		}
 		answer.setMediaDescriptions(answerMediaDescriptions);
 		IceSdpUtils.initSessionDescription(answer, iceAgent);
-		try {
-			SdpUtils.parseSDP(iceAgent, offer);
-		} catch (Exception ignore) {
-			ignore.printStackTrace();
-		}
 		logger.info("<< {{}} codecs were declared in {} answer {{}} to {} offer {{}} >>",
 			allMediaFormats, sessionType, answer, sessionType, offer);
 		try {
@@ -595,7 +592,7 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 							}
 							if (supportedMediaCodec != null) {
 								IceMediaStream mediaStream = iceAgent
-									.createMediaStream(supportedMediaCodec.getEncoding());
+									.createMediaStream(supportedMediaCodec.getRtpmap());
 								try {
 									iceAgent.createComponent(mediaStream, Transport.UDP,
 										localPort, minPort, minPort + maxPort);
@@ -706,16 +703,17 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 	private void prepareForSessionSetup(final String callId, final SessionType type,
 			final SessionDescription offer, final SessionDescription answer, final Agent iceAgent)
 					throws SdpException {
-		extractConnectionInformation(answer, new ExtractionCallbackImpl
-				(roles.get(getSessionKey(callId, type)).toString(), "ANSWER") {
+		final CallRole actualRole = roles.get(getSessionKey(callId, type));
+		extractConnectionInformation(answer, iceAgent, actualRole == CallRole.CALLER,
+				new ExtractionCallbackImpl(roles.get(getSessionKey(callId, type)).toString(), "ANSWER") {
 
 			@Override
 			public void onConnectionInfoExtracted(final String answerDataAddress,
 					final int answerDataPort, final String answerControlAddress,
 					final int answerControlPort, final String answerRtpmap,
 					final int answerCodecType, final MediaDirection answerDirection) {
-				extractConnectionInformation(offer, new ExtractionCallbackImpl
-						(CallRole.CALLER.toString(), "OFFER") {
+				extractConnectionInformation(offer, iceAgent, actualRole == CallRole.CALLEE,
+						new ExtractionCallbackImpl(roles.get(getSessionKey(callId, type)).toString(), "OFFER") {
 
 					@Override
 					public void onConnectionInfoExtracted(final String offerDataAddress,
@@ -771,7 +769,7 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 										logger.debug("ICE4J:agent.getState(): {}", agent.getState());
 										if (agent.getState().equals(IceProcessingState.TERMINATED)) {
 											IceMediaStream mediaStream = agent
-												.getStream(mediaCodecOfInterest.getEncoding());
+												.getStream(mediaCodecOfInterest.getRtpmap());
 											if (mediaStream == null) {
 												return;
 											}
@@ -793,7 +791,7 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 												streams.put(getSessionKey(callId, type),
 													new HashMap<SupportedMediaCodec, Session>());
 											}
-											switch (roles.get(getSessionKey(callId, type))) {
+											switch (actualRole) {
 												case CALLER:
 													logger.debug("%% Scheduled a {} ({}) stream from "
 														+ "[rtp = {}:{}, rtcp = {}:{}] to [rtp = {}:{} --> {}:{},"
@@ -847,8 +845,8 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 	}
 
 	@SuppressWarnings("unchecked")
-	private void extractConnectionInformation(SessionDescription sdp,
-			ExtractionCallback callback) {
+	private void extractConnectionInformation(SessionDescription sdp, Agent iceAgent,
+			final boolean shouldParseCandidatesAndFeedIceAgent, ExtractionCallback callback) {
 		logger.debug("%% {} will extract connection info from {} sdp as {}! %%",
 			LibJitsiMediaSipuadaPlugin.class.getSimpleName(),
 			callback.getSdpType(), callback.getRole());
@@ -928,6 +926,7 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 						String rtpmap = attributeField.getValue().split(" ")[1].trim();
 						logger.debug("%% RTPMAP: {} --- CodecType: {}! %%",
 							rtpmap, codecType);
+
 						final Connection connection = mediaDescription.getConnection();
 						final Media media = mediaDescription.getMedia();
 						final String dataAddress;
@@ -967,6 +966,51 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 							? parentControlPort == null ? dataPort + 1
 							: Integer.parseInt(parentControlPort) : Integer
 							.parseInt(possibleControlConnection.split("\\:")[1]);
+
+						IceMediaStream relatedIceStream = iceAgent.getStream(rtpmap);
+			            Component rtpComponent = relatedIceStream.getComponent(Component.RTP);
+			            Component rtcpComponent = relatedIceStream.getComponent(Component.RTCP);
+			            if (shouldParseCandidatesAndFeedIceAgent && relatedIceStream != null
+								&& (rtpComponent != null && rtpComponent
+									.getDefaultRemoteCandidate() == null)
+								&& (rtcpComponent == null || rtcpComponent
+									.getDefaultRemoteCandidate() == null)) {
+			            	logger.debug("%% About to attempt extracting relevant"
+								+ " ICE information from remote SDP.");
+			            	String remoteIceUsernameFragment = sdp.getAttribute("ice-ufrag");
+		                	relatedIceStream.setRemoteUfrag(remoteIceUsernameFragment);
+		                	logger.debug("%% Remote ICE username fragment: {} set"
+	                			+ " into related ICE media stream", remoteIceUsernameFragment);
+			            	String remoteIcePassword = sdp.getAttribute("ice-pwd");
+		                	relatedIceStream.setRemotePassword(remoteIcePassword);
+		                	logger.debug("%% Remote ICE password: {} set"
+		                			+ " into related ICE media stream", remoteIcePassword);
+				            TransportAddress defaultRemoteRtpAddress = new TransportAddress
+			            		(dataAddress, dataPort, Transport.UDP);
+				            Candidate<?> defaultRtpCandidate = rtpComponent
+			            		.findRemoteCandidate(defaultRemoteRtpAddress);
+				            rtpComponent.setDefaultRemoteCandidate(defaultRtpCandidate);
+							logger.debug("%% Related ICE stream's RTP component:"
+								+ " {}:{} ({}) %%", rtpComponent, dataAddress, dataPort);
+				            if (rtcpComponent != null) {
+					            TransportAddress defaultRemoteRtcpAddress = new TransportAddress
+				            		(controlAddress, controlPort, Transport.UDP);
+					            Candidate<?> defaultRtcpCandidate = rtpComponent
+				            		.findRemoteCandidate(defaultRemoteRtcpAddress);
+					            rtcpComponent.setDefaultRemoteCandidate(defaultRtcpCandidate);
+								logger.debug("%% Related ICE stream's RTCP component:"
+									+ " ({}:{}) {} %%", rtcpComponent, controlAddress, controlPort);
+				            }
+							for (AttributeField candidateAttributeField : attributeFields) {
+								if (candidateAttributeField.getName() != null
+										&& candidateAttributeField.getName()
+											.equals(CandidateAttribute.NAME)) {
+									retrieveCandidateInfoAndBindToAgentIfApplicable
+										(relatedIceStream, candidateAttributeField);
+								}
+							}
+			            }
+
 						callback.onConnectionInfoExtracted(dataAddress, dataPort,
 							controlAddress, controlPort,rtpmap, codecType, direction);
 						someConnectionInfoExtractedSuccessfully = true;
@@ -1026,6 +1070,66 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 			}
 		}
 		return String.format(Locale.US, "%s:%s", controlAddress, controlPort);
+	}
+
+	private void retrieveCandidateInfoAndBindToAgentIfApplicable
+			(IceMediaStream relatedIceStream, AttributeField candidateAttribute) {
+		String fullCandidateAttributeValue;
+        try {
+            fullCandidateAttributeValue = candidateAttribute.getValue();
+        } catch (Throwable ignore){
+        	ignore.printStackTrace();
+        	return;
+        }
+
+        logger.debug("%% About to parse candidate line: {} %%", fullCandidateAttributeValue);
+        String[] candidateAttributeValueParts = fullCandidateAttributeValue.trim().split("\\s+");
+        String foundation = candidateAttributeValueParts[0];
+        int componentId = Integer.parseInt(candidateAttributeValueParts[1]);
+        Transport transport = Transport.parse(candidateAttributeValueParts[2]);
+        long priority = Long.parseLong(candidateAttributeValueParts[3]);
+        String address = candidateAttributeValueParts[4];
+        int port = Integer.parseInt(candidateAttributeValueParts[5]);
+        CandidateType type = CandidateType.parse(candidateAttributeValueParts[7]);
+        String relatedAddress = candidateAttributeValueParts.length > 8
+    		? candidateAttributeValueParts[9] : null;
+        int relatedPort = candidateAttributeValueParts.length > 10
+    		? Integer.parseInt(candidateAttributeValueParts[11]) : -1;
+
+        Component component = relatedIceStream.getComponent(componentId);
+        if (component == null) {
+    		logger.debug("%% No component of id {} is related to {} ICE stream ({}). %%",
+				componentId, relatedIceStream.getName(), relatedIceStream);
+        	return;
+        }
+		logger.debug("%% Component of id {} is related to {} ICE stream ({}). %%",
+			componentId, relatedIceStream.getName(), relatedIceStream);
+
+        TransportAddress transportAddress = new TransportAddress(address, port, transport);
+        RemoteCandidate relatedCandidate = null;
+        if (relatedAddress != null && relatedPort != -1) {
+            TransportAddress relatedTransportAddress = new TransportAddress
+        		(relatedAddress, relatedPort, Transport.UDP);
+        	relatedCandidate = component.findRemoteCandidate(relatedTransportAddress);
+        }
+
+        for (RemoteCandidate remoteCandidate : component.getRemoteCandidates()) {
+        	if (remoteCandidate.getFoundation().equals(foundation)
+        			&& remoteCandidate.getPriority() == priority
+        			&& remoteCandidate.getTransportAddress().equals(transportAddress)
+        			&& remoteCandidate.getRelatedCandidate().equals(relatedCandidate)
+        			&& remoteCandidate.getType() == type) {
+        		return;
+        	}
+        }
+
+        logger.debug("%% ICE remote candidate (address:[{}:{}], type:[{}],"
+        	+ " priority:[{}], foundation:[{}], relatedCandidate:[{}])"
+        	+ " will be added to component. %%", transportAddress.getHostAddress(),
+        	transportAddress.getPort(), type, priority, foundation, relatedCandidate);
+        RemoteCandidate remoteCandidate = new RemoteCandidate(transportAddress,
+    		component, type, foundation, priority, relatedCandidate);
+        component.addRemoteCandidate(remoteCandidate);
 	}
 
 	@Override
