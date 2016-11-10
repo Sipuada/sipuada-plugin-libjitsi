@@ -3,7 +3,9 @@ package org.github.sipuada.plugins.audio;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.io.IOException;
+import java.net.DatagramSocket;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -11,6 +13,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
+import java.util.UUID;
 import java.util.Vector;
 import java.util.logging.Level;
 
@@ -31,9 +34,16 @@ import org.ice4j.ice.harvest.StunCandidateHarvester;
 import org.ice4j.ice.sdp.CandidateAttribute;
 import org.ice4j.ice.sdp.IceSdpUtils;
 import org.jitsi.service.libjitsi.LibJitsi;
+import org.jitsi.service.neomedia.DefaultStreamConnector;
 import org.jitsi.service.neomedia.MediaDirection;
+import org.jitsi.service.neomedia.MediaService;
 import org.jitsi.service.neomedia.MediaStream;
+import org.jitsi.service.neomedia.MediaStreamTarget;
 import org.jitsi.service.neomedia.MediaType;
+import org.jitsi.service.neomedia.MediaUseCase;
+import org.jitsi.service.neomedia.StreamConnector;
+import org.jitsi.service.neomedia.device.MediaDevice;
+import org.jitsi.service.neomedia.format.MediaFormat;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -233,7 +243,8 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 		}
 
     }
-    private final Map<String, Map<SupportedMediaCodec, Session>> streams = new HashMap<>();
+    private final Map<String, Map<SupportedMediaCodec, Session>> preparedStreams = new HashMap<>();
+    private final Map<String, SipUserAgent> postponedStreams = new HashMap<>();
     private final Map<String, Boolean> startedStreams = new HashMap<>();
 
     private final Map<String, Agent> iceAgents = new HashMap<>();
@@ -787,13 +798,13 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 											String remoteControlAddress = rtcpTransportAddress
 												.getAddress().getHostAddress();
 											int remoteControlPort = rtcpTransportAddress.getPort();
-											if (!streams.containsKey(getSessionKey(callId, type))) {
-												streams.put(getSessionKey(callId, type),
+											if (!preparedStreams.containsKey(getSessionKey(callId, type))) {
+												preparedStreams.put(getSessionKey(callId, type),
 													new HashMap<SupportedMediaCodec, Session>());
 											}
 											switch (actualRole) {
 												case CALLER:
-													logger.debug("%% Scheduled a {} ({}) stream from "
+													logger.debug("%% Prepared a {} ({}) stream from "
 														+ "[rtp = {}:{}, rtcp = {}:{}] to [rtp = {}:{} --> {}:{},"
 														+ " rtcp = {}:{} --> {}:{}]! %%", mediaCodecOfInterest,
 														offerDirection, offerDataAddress, offerDataPort,
@@ -801,14 +812,14 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 														answerDataPort, remoteDataAddress, remoteDataPort,
 														answerControlAddress, answerControlPort,
 														remoteControlAddress, remoteControlPort);
-													streams.get(getSessionKey(callId, type)).put
+													preparedStreams.get(getSessionKey(callId, type)).put
 														(mediaCodecOfInterest, new Session(offerDataAddress,
 														offerDataPort, offerControlAddress, offerControlPort,
 														remoteDataAddress, remoteDataPort, remoteControlAddress,
 														remoteControlPort, offerDirection));
 													break;
 												case CALLEE:
-													logger.debug("%% Scheduled a {} ({}) stream from "
+													logger.debug("%% Prepared a {} ({}) stream from "
 														+ "[rtp = {}:{}, rtcp = {}:{}] to [rtp = {}:{} --> {}:{},"
 														+ " rtcp = {}:{} --> {}:{}]! %%", mediaCodecOfInterest,
 														answerDirection, answerDataAddress, answerDataPort,
@@ -816,12 +827,16 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 														offerDataPort, remoteDataAddress, remoteDataPort,
 														offerControlAddress, offerControlPort,
 														remoteControlAddress, remoteControlPort);
-													streams.get(getSessionKey(callId, type)).put
+													preparedStreams.get(getSessionKey(callId, type)).put
 														(mediaCodecOfInterest, new Session(answerDataAddress,
 														answerDataPort, answerControlAddress, answerControlPort,
 														remoteDataAddress, remoteDataPort, remoteControlAddress,
 														remoteControlPort, answerDirection));
 													break;
+											}
+											if (postponedStreams.containsKey(getSessionKey(callId, type))) {
+												performSessionSetup(callId, type, postponedStreams
+													.get(getSessionKey(callId, type)));
 											}
 										}
 									}
@@ -1137,86 +1152,95 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 		logger.debug("===*** performSessionSetup -> {}", getSessionKey(callId, type));
 		Record record = records.get(getSessionKey(callId, type));
 		SessionDescription offer = record.getOffer(), answer = record.getAnswer();
+		if (!preparedStreams.containsKey((getSessionKey(callId, type)))) {
+			logger.info("^^ {} postponed session setup in context of call {}...\n"
+				+ "Role: {{}}\nOffer: {{}}\nAnswer: {{}} ^^",
+				LibJitsiMediaSipuadaPlugin.class.getSimpleName(), callId,
+				roles.get(getSessionKey(callId, type)), offer, answer);
+			postponedStreams.put(getSessionKey(callId, type), userAgent);
+			return true;
+		}
 		logger.info("^^ {} performing session setup in context of call {}...\n"
 			+ "Role: {{}}\nOffer: {{}}\nAnswer: {{}} ^^",
 			LibJitsiMediaSipuadaPlugin.class.getSimpleName(), callId,
 			roles.get(getSessionKey(callId, type)), offer, answer);
-//		MediaService mediaService = LibJitsi.getMediaService();
-//		for (SupportedMediaCodec supportedMediaCodec : streams
-//				.get(getSessionKey(callId, type)).keySet()) {
-//			final String streamName = UUID.randomUUID().toString();
-//			Session session = streams.get(getSessionKey(callId, type))
-//				.get(supportedMediaCodec);
-//			MediaDevice device = mediaService.getDefaultDevice
-//				(supportedMediaCodec.getMediaType(), MediaUseCase.CALL);
-//			MediaStream mediaStream = mediaService
-//				.createMediaStream(device);
-//			mediaStream.setName(streamName);
-//			boolean streamIsRejected = false;
-//			switch (roles.get(getSessionKey(callId, type))) {
-//				case CALLER:
-//					if (session.getRemoteDataPort() == 0) {
-//						streamIsRejected = true;
-//					}
-//					break;
-//				case CALLEE:
-//					if (session.getLocalDataPort() == 0) {
-//						streamIsRejected = true;
-//					}
-//					break;
-//			}
-//			if (!streamIsRejected) {
-//				logger.info("^^ Should setup a {} *data* stream [{}] from "
-//					+ "{}:{} (origin) to {}:{} (destination)! ^^", supportedMediaCodec,
-//					streamName, session.getLocalDataAddress(), session.getLocalDataPort(),
-//					session.getRemoteDataAddress(), session.getRemoteDataPort());
-//				logger.info("^^ Should setup a {} *control* stream [{}] from "
-//					+ "{}:{} (origin) to {}:{} (destination)! ^^", supportedMediaCodec,
-//					streamName, session.getLocalControlAddress(),
-//					session.getLocalControlPort(), session.getRemoteControlAddress(),
-//					session.getRemoteControlPort());
-//				MediaFormat mediaFormat = mediaService.getFormatFactory()
-//					.createMediaFormat(supportedMediaCodec.getEncoding(),
-//					supportedMediaCodec.getClockRate());
-//				mediaStream.setFormat(mediaFormat);
-//				try {
-//					StreamConnector connector = new DefaultStreamConnector
-//						(new DatagramSocket(session.getLocalDataPort(),
-//							InetAddress.getByName(session.getLocalDataAddress())),
-//						new DatagramSocket(session.getLocalControlPort(),
-//							InetAddress.getByName(session.getLocalControlAddress())));
-//					mediaStream.setConnector(connector);
-//					MediaStreamTarget target = new MediaStreamTarget
-//						(new InetSocketAddress(session.getRemoteDataAddress(),
-//							session.getRemoteDataPort()),
-//						(new InetSocketAddress(session.getRemoteControlAddress(),
-//							session.getRemoteControlPort())));
-//					mediaStream.setTarget(target);
-//					session.setStream(mediaStream);
-//				} catch (Throwable anyIssue) {
-//					logger.info("^^ Could not setup {} *data* stream [{}]! ^^",
-//						supportedMediaCodec, streamName);
-//					logger.info("^^ Could not setup {} *control* stream [{}]! ^^",
-//						supportedMediaCodec, streamName, anyIssue);
-//				}
-//			} else {
-//				session.setStream(mediaStream);
-//			}
-//		}
-//		for (SupportedMediaCodec supportedMediaCodec : streams
-//				.get(getSessionKey(callId, type)).keySet()) {
-//			Session session = streams.get(getSessionKey(callId, type))
-//				.get(supportedMediaCodec);
-//			MediaStream mediaStream = session.getStream();
-//			if (mediaStream != null
-//					&& mediaStream.getDirection() != MediaDirection.INACTIVE) {
-//				logger.info("^^ Starting {} *data* stream [{}]! ^^",
-//					supportedMediaCodec, mediaStream.getName());
-//				logger.info("^^ Starting {} *control* stream [{}]! ^^",
-//					supportedMediaCodec, mediaStream.getName());
-//				mediaStream.start();
-//			}
-//		}
+		MediaService mediaService = LibJitsi.getMediaService();
+		for (SupportedMediaCodec supportedMediaCodec : preparedStreams
+				.get(getSessionKey(callId, type)).keySet()) {
+			final String streamName = UUID.randomUUID().toString();
+			Session session = preparedStreams.get(getSessionKey(callId, type))
+				.get(supportedMediaCodec);
+			MediaDevice device = mediaService.getDefaultDevice
+				(supportedMediaCodec.getMediaType(), MediaUseCase.CALL);
+			MediaStream mediaStream = mediaService
+				.createMediaStream(device);
+			mediaStream.setName(streamName);
+			boolean streamIsRejected = false;
+			switch (roles.get(getSessionKey(callId, type))) {
+				case CALLER:
+					if (session.getRemoteDataPort() == 0) {
+						streamIsRejected = true;
+					}
+					break;
+				case CALLEE:
+					if (session.getLocalDataPort() == 0) {
+						streamIsRejected = true;
+					}
+					break;
+			}
+			if (!streamIsRejected) {
+				logger.info("^^ Should setup a {} *data* stream [{}] from "
+					+ "{}:{} (origin) to {}:{} (destination)! ^^", supportedMediaCodec,
+					streamName, session.getLocalDataAddress(), session.getLocalDataPort(),
+					session.getRemoteDataAddress(), session.getRemoteDataPort());
+				logger.info("^^ Should setup a {} *control* stream [{}] from "
+					+ "{}:{} (origin) to {}:{} (destination)! ^^", supportedMediaCodec,
+					streamName, session.getLocalControlAddress(),
+					session.getLocalControlPort(), session.getRemoteControlAddress(),
+					session.getRemoteControlPort());
+				MediaFormat mediaFormat = mediaService.getFormatFactory()
+					.createMediaFormat(supportedMediaCodec.getEncoding(),
+					supportedMediaCodec.getClockRate());
+				mediaStream.setFormat(mediaFormat);
+				try {
+					StreamConnector connector = new DefaultStreamConnector
+						(new DatagramSocket(session.getLocalDataPort(),
+							InetAddress.getByName(session.getLocalDataAddress())),
+						new DatagramSocket(session.getLocalControlPort(),
+							InetAddress.getByName(session.getLocalControlAddress())));
+					mediaStream.setConnector(connector);
+					MediaStreamTarget target = new MediaStreamTarget
+						(new InetSocketAddress(session.getRemoteDataAddress(),
+							session.getRemoteDataPort()),
+						(new InetSocketAddress(session.getRemoteControlAddress(),
+							session.getRemoteControlPort())));
+					mediaStream.setTarget(target);
+					session.setStream(mediaStream);
+				} catch (Throwable anyIssue) {
+					logger.info("^^ Could not setup {} *data* stream [{}]! ^^",
+						supportedMediaCodec, streamName);
+					logger.info("^^ Could not setup {} *control* stream [{}]! ^^",
+						supportedMediaCodec, streamName, anyIssue);
+				}
+			} else {
+				session.setStream(mediaStream);
+			}
+		}
+		for (SupportedMediaCodec supportedMediaCodec : preparedStreams
+				.get(getSessionKey(callId, type)).keySet()) {
+			Session session = preparedStreams.get(getSessionKey(callId, type))
+				.get(supportedMediaCodec);
+			MediaStream mediaStream = session.getStream();
+			if (mediaStream != null
+					&& mediaStream.getDirection() != MediaDirection.INACTIVE) {
+				logger.info("^^ Starting {} *data* stream [{}]! ^^",
+					supportedMediaCodec, mediaStream.getName());
+				logger.info("^^ Starting {} *control* stream [{}]! ^^",
+					supportedMediaCodec, mediaStream.getName());
+				mediaStream.start();
+			}
+		}
+		postponedStreams.remove(getSessionKey(callId, type));
 		startedStreams.put(getSessionKey(callId, type), true);
 		return true;
 	}
