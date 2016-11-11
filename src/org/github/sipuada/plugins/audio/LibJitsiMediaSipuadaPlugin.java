@@ -344,7 +344,7 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 		Agent iceAgent = iceAgents.get(callId);
 		if (iceAgent == null) {
 			iceAgent = new Agent(Level.ALL, localAddress);
-			iceAgent.setTrickling(true);
+			iceAgent.setTrickling(false);
 			iceAgent.setUseHostHarvester(true);
 			turnHarvester = createTurnHarvester(localAddress);
 			if (turnHarvester != null) {
@@ -366,7 +366,7 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 	private CandidateHarvester createStunHarvester(String localAddress) {
     	try {
 			return new StunCandidateHarvester(new TransportAddress
-				(InetAddress.getByName("stun.icchw.jflddns.com.br"), 3478, Transport.UDP));
+				(InetAddress.getByName("stun4.l.google.com"), 19302, Transport.UDP));
 		} catch (UnknownHostException stunServerUnavailable) {
 			stunServerUnavailable.printStackTrace();
 	    	return null;
