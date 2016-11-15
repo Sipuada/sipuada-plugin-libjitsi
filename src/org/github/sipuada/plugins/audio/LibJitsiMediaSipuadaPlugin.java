@@ -28,6 +28,7 @@ import org.ice4j.ice.CandidateType;
 import org.ice4j.ice.Component;
 import org.ice4j.ice.IceMediaStream;
 import org.ice4j.ice.IceProcessingState;
+import org.ice4j.ice.LocalCandidate;
 import org.ice4j.ice.RemoteCandidate;
 import org.ice4j.ice.harvest.CandidateHarvester;
 import org.ice4j.ice.harvest.StunCandidateHarvester;
@@ -959,8 +960,8 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 
 						final Connection connection = mediaDescription.getConnection();
 						final Media media = mediaDescription.getMedia();
-						final String dataAddress;
-						final int dataPort;
+						String dataAddress;
+						int dataPort;
 						if (media == null || (parentDataAddress == null
 								&& connection == null)) {
 							callback.onExtractionIgnored(rtpmap, codecType);
@@ -985,12 +986,12 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 								+ "control connection info! %%",
 								LibJitsiMediaSipuadaPlugin.class.getSimpleName());
 						}
-						final String controlAddress = possibleControlConnection == null
+						String controlAddress = possibleControlConnection == null
 							|| !possibleControlConnection.contains("\\:")
 							|| possibleControlConnection.split("\\:")[0].isEmpty()
 							? parentControlAddress != null ? parentControlAddress
 							: dataAddress : possibleControlConnection.split("\\:")[0];
-						final int controlPort = possibleControlConnection == null
+						int controlPort = possibleControlConnection == null
 							|| !possibleControlConnection.contains("\\:")
 							|| possibleControlConnection.split("\\:")[1].isEmpty()
 							? parentControlPort == null ? dataPort + 1
@@ -1039,6 +1040,34 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 										(relatedIceStream, candidateAttributeField);
 								}
 							}
+			            } else if (!shouldParseCandidatesAndFeedIceAgent
+			            		&& relatedIceStream != null && rtpComponent != null) {
+			            	logger.debug("%% About to attempt extracting relevant"
+								+ " ICE information from local SDP.");
+			            	for (LocalCandidate localCandidate
+			            			: rtpComponent.getLocalCandidates()) {
+			            		if (localCandidate.getType()
+			            				== CandidateType.HOST_CANDIDATE) {
+			            			dataAddress = localCandidate
+		            					.getTransportAddress().getHostAddress();
+			            			dataPort = localCandidate
+		            					.getTransportAddress().getPort();
+			            			break;
+			            		}
+			            	}
+			            	if (rtcpComponent != null) {
+				            	for (LocalCandidate localCandidate
+				            			: rtcpComponent.getLocalCandidates()) {
+				            		if (localCandidate.getType()
+				            				== CandidateType.HOST_CANDIDATE) {
+				            			controlAddress = localCandidate
+			            					.getTransportAddress().getHostAddress();
+				            			controlPort = localCandidate
+			            					.getTransportAddress().getPort();
+				            			break;
+				            		}
+				            	}
+			            	}
 			            }
 
 						callback.onConnectionInfoExtracted(dataAddress, dataPort,
