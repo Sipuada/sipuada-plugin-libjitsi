@@ -845,6 +845,11 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 												iceAgent.free();
 											}
 											if (postponedStreams.containsKey(getSessionKey(callId, type))) {
+												try {
+													Thread.sleep(3000);
+												} catch (InterruptedException ignore) {
+													ignore.printStackTrace();
+												}
 												performSessionSetup(callId, type, postponedStreams
 													.get(getSessionKey(callId, type)));
 											}
