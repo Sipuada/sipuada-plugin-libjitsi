@@ -835,6 +835,10 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 													break;
 											}
 											iceAgent.removeStateChangeListener(this);
+											mediaStream.removeComponent(rtpComponent);
+											if (rtcpComponent != null) {
+												mediaStream.removeComponent(rtcpComponent);
+											}
 											iceAgent.removeStream(mediaStream);
 											if (iceAgent.getStreamCount() == 0) {
 												iceAgents.remove(getSessionKey(callId, type));
