@@ -999,8 +999,11 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 							.parseInt(possibleControlConnection.split("\\:")[1]);
 
 						IceMediaStream relatedIceStream = iceAgent.getStream(rtpmap);
-			            Component rtpComponent = relatedIceStream.getComponent(Component.RTP);
-			            Component rtcpComponent = relatedIceStream.getComponent(Component.RTCP);
+						Component rtpComponent = null, rtcpComponent = null;
+						if (relatedIceStream != null) {
+				            rtpComponent = relatedIceStream.getComponent(Component.RTP);
+				            rtcpComponent = relatedIceStream.getComponent(Component.RTCP);
+						}
 			            if (shouldParseCandidatesAndFeedIceAgent && relatedIceStream != null
 								&& (rtpComponent != null && rtpComponent
 									.getDefaultRemoteCandidate() == null)
