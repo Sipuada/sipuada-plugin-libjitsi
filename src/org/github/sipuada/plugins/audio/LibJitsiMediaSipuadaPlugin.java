@@ -264,7 +264,7 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 
 	@Override
 	public SessionDescription generateOffer(String callId, SessionType type, String localAddress) {
-		logger.debug("===*** generateOffer -> {}", callId);
+		logger.debug("===*** generateOffer -> {}", getSessionKey(callId, type));
 		roles.put(getSessionKey(callId, type),  CallRole.CALLER);
 		try {
 			Agent iceAgent = createOrFetchExistingAgent
