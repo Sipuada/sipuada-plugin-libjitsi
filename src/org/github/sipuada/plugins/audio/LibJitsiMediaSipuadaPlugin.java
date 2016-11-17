@@ -65,6 +65,7 @@ import android.javax.sdp.SessionDescription;
 
 public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 
+	private static final boolean ICE_IS_SUPPORTED = false;
 	private final Logger logger = LoggerFactory.getLogger
 		(LibJitsiMediaSipuadaPlugin.class);
 
@@ -424,6 +425,9 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 			allMediaFormats, mediaDescriptions, iceAgent);
 		offer.setMediaDescriptions(mediaDescriptions);
 		IceSdpUtils.initSessionDescription(offer, iceAgent);
+		if (!ICE_IS_SUPPORTED) {
+			removeIceInformationFromSdp(offer);
+		}
 		logger.info("<< {{}} codecs were declared in offer {{}} >>",
 			allMediaFormats, offer);
 		return offer;
@@ -457,7 +461,7 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 			int maxPort = (32767 - 16384);
 			int localPort = new Random().nextInt(maxPort) + minPort;
 			IceMediaStream mediaStream = iceAgent
-				.createMediaStream(mediaCodec.getRtpmap());
+				.createMediaStream(mediaCodec.getRtpmap().toLowerCase());
 			try {
 				iceAgent.createComponent(mediaStream, Transport.UDP,
 					localPort, minPort, minPort + maxPort);
@@ -494,6 +498,9 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 		}
 		answer.setMediaDescriptions(answerMediaDescriptions);
 		IceSdpUtils.initSessionDescription(answer, iceAgent);
+		if (!ICE_IS_SUPPORTED) {
+			removeIceInformationFromSdp(answer);
+		}
 		logger.info("<< {{}} codecs were declared in {} answer {{}} to {} offer {{}} >>",
 			allMediaFormats, sessionType, answer, sessionType, offer);
 		try {
@@ -601,8 +608,8 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 								localPort = 0;
 							}
 							if (supportedMediaCodec != null) {
-								IceMediaStream mediaStream = iceAgent
-									.createMediaStream(supportedMediaCodec.getRtpmap());
+								IceMediaStream mediaStream = iceAgent.createMediaStream
+									(supportedMediaCodec.getRtpmap().toLowerCase());
 								try {
 									iceAgent.createComponent(mediaStream, Transport.UDP,
 										localPort, minPort, minPort + maxPort);
@@ -633,6 +640,18 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 				}
 			}
 		}
+	}
+
+//	@SuppressWarnings("unchecked")
+	private void removeIceInformationFromSdp(SessionDescription sdp) {
+//		try {
+//			Vector<MediaDescription> mediaDescriptions = sdp.getMediaDescriptions(true);
+//			for (MediaDescription mediaDescription : mediaDescriptions) {
+//				Vector<AttributeField> attributeFields = mediaDescription.getAttributes(true);
+//			}
+//		} catch (SdpException ignore) {}
+		//TODO remove all candidate attributes from all media descriptions, as well as
+		//additional ICE parameters that were added to this session description.
 	}
 
 	interface ExtractionCallback {
@@ -713,8 +732,11 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 	private void prepareForSessionSetup(final String callId, final SessionType type,
 			final SessionDescription offer, final SessionDescription answer, final Agent iceAgent)
 					throws SdpException {
+		if (!ICE_IS_SUPPORTED) {
+			cleanUpIceAgent(callId, type, iceAgent);
+		}
 		final CallRole actualRole = roles.get(getSessionKey(callId, type));
-		extractConnectionInformation(answer, iceAgent, actualRole == CallRole.CALLER,
+		extractConnectionInformation(answer, callId, type, iceAgent, actualRole == CallRole.CALLER,
 				new ExtractionCallbackImpl(roles.get(getSessionKey(callId, type)).toString(), "ANSWER") {
 
 			@Override
@@ -722,7 +744,7 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 					final int answerDataPort, final String answerControlAddress,
 					final int answerControlPort, final String answerRtpmap,
 					final int answerCodecType, final MediaDirection answerDirection) {
-				extractConnectionInformation(offer, iceAgent, actualRole == CallRole.CALLEE,
+				extractConnectionInformation(offer, callId, type, iceAgent, actualRole == CallRole.CALLEE,
 						new ExtractionCallbackImpl(roles.get(getSessionKey(callId, type)).toString(), "OFFER") {
 
 					@Override
@@ -769,6 +791,14 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 									answerRtpmap + " - " + answerCodecType);
 							}
 							final SupportedMediaCodec mediaCodecOfInterest = supportedMediaCodec;
+							if (iceAgent.isOver()) {
+								doPrepareStream(callId, type, actualRole, mediaCodecOfInterest,
+									offerDirection, offerDataAddress, offerDataPort,
+									offerControlAddress, offerControlPort,
+									answerDirection, answerDataAddress, answerDataPort,
+									answerControlAddress, answerControlPort);
+								return;
+							}
 							iceAgent.addStateChangeListener(new PropertyChangeListener() {
 
 								@Override
@@ -780,7 +810,7 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 											logger.debug("ICE4J:agent.getState(): {}", agent.getState());
 											if (agent.getState().equals(IceProcessingState.TERMINATED)) {
 												IceMediaStream mediaStream = agent
-													.getStream(mediaCodecOfInterest.getRtpmap());
+													.getStream(mediaCodecOfInterest.getRtpmap().toLowerCase());
 												if (mediaStream == null) {
 													return;
 												}
@@ -798,60 +828,16 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 												String remoteControlAddress = rtcpTransportAddress
 													.getAddress().getHostAddress();
 												int remoteControlPort = rtcpTransportAddress.getPort();
-												if (!preparedStreams.containsKey(getSessionKey(callId, type))) {
-													preparedStreams.put(getSessionKey(callId, type),
-														new HashMap<SupportedMediaCodec, Session>());
-												}
-												switch (actualRole) {
-													case CALLER:
-														logger.debug("%% Prepared a {} ({}) stream from "
-															+ "[rtp = {}:{}, rtcp = {}:{}] to [rtp = {}:{} --> {}:{},"
-															+ " rtcp = {}:{} --> {}:{}]! %%", mediaCodecOfInterest,
-															offerDirection, offerDataAddress, offerDataPort,
-															offerControlAddress, offerControlPort, answerDataAddress,
-															answerDataPort, remoteDataAddress, remoteDataPort,
-															answerControlAddress, answerControlPort,
-															remoteControlAddress, remoteControlPort);
-														preparedStreams.get(getSessionKey(callId, type)).put
-															(mediaCodecOfInterest, new Session(offerDataAddress,
-															offerDataPort, offerControlAddress, offerControlPort,
-															remoteDataAddress, remoteDataPort, remoteControlAddress,
-															remoteControlPort, offerDirection));
-														break;
-													case CALLEE:
-														logger.debug("%% Prepared a {} ({}) stream from "
-															+ "[rtp = {}:{}, rtcp = {}:{}] to [rtp = {}:{} --> {}:{},"
-															+ " rtcp = {}:{} --> {}:{}]! %%", mediaCodecOfInterest,
-															answerDirection, answerDataAddress, answerDataPort,
-															answerControlAddress, answerControlPort, offerDataAddress,
-															offerDataPort, remoteDataAddress, remoteDataPort,
-															offerControlAddress, offerControlPort,
-															remoteControlAddress, remoteControlPort);
-														preparedStreams.get(getSessionKey(callId, type)).put
-															(mediaCodecOfInterest, new Session(answerDataAddress,
-															answerDataPort, answerControlAddress, answerControlPort,
-															remoteDataAddress, remoteDataPort, remoteControlAddress,
-															remoteControlPort, answerDirection));
-														break;
-												}
 												iceAgent.removeStateChangeListener(this);
-												mediaStream.removeComponent(rtpComponent);
-												if (rtcpComponent != null) {
-													mediaStream.removeComponent(rtcpComponent);
-												}
-												iceAgent.removeStream(mediaStream);
-												if (iceAgent.getStreamCount() == 0) {
-													iceAgents.remove(getSessionKey(callId, type));
-													iceAgent.free();
-												}
-												if (postponedStreams.containsKey(getSessionKey(callId, type))) {
-													performSessionSetup(callId, type, postponedStreams
-														.get(getSessionKey(callId, type)));
-												} else {
-													logger.debug("%% Prepared {} ({}) stream discarded "
-														+ "since scheduled setup was canceled! %%",
-														mediaCodecOfInterest, answerDirection);
-												}
+												cleanUpIceAgent(callId, type, iceAgent,
+													mediaStream, rtpComponent, rtcpComponent);
+												doPrepareStream(callId, type, actualRole, mediaCodecOfInterest,
+													offerDirection, offerDataAddress, offerDataPort,
+													offerControlAddress, offerControlPort,
+													answerDirection, answerDataAddress, answerDataPort,
+													answerControlAddress, answerControlPort,
+													remoteDataAddress, remoteDataPort,
+													remoteControlAddress, remoteControlPort);
 											}
 										}
 									}
@@ -866,16 +852,19 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 
 			@Override
 			public void onDoneExtractingConnectionInfo() {
-				logger.debug("%% Just finished extracting some "
-					+ "connection info so starting ICE processing... %%");
-				iceAgent.startConnectivityEstablishment();
+				if (!iceAgent.isOver()) {
+					logger.debug("%% Just finished extracting some "
+						+ "connection info so starting ICE processing... %%");
+					iceAgent.startConnectivityEstablishment();
+				}
 			}
 
 		});
 	}
 
 	@SuppressWarnings("unchecked")
-	private void extractConnectionInformation(SessionDescription sdp, Agent iceAgent,
+	private void extractConnectionInformation
+			(SessionDescription sdp, String callId, SessionType type, Agent iceAgent,
 			final boolean shouldParseCandidatesAndFeedIceAgent, ExtractionCallback callback) {
 		logger.debug("%% {} will extract connection info from {} sdp as {}! %%",
 			LibJitsiMediaSipuadaPlugin.class.getSimpleName(),
@@ -924,7 +913,7 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 		boolean someConnectionInfoExtractedSuccessfully = true;
 		for (MediaDescription mediaDescription : mediaDescriptions) {
 			Vector<AttributeField> attributeFields
-				= ((MediaDescription) mediaDescription).getAttributes(false);
+				= ((MediaDescription) mediaDescription).getAttributes(true);
 			MediaDirection direction = MediaDirection.SENDRECV;
 			for (AttributeField attributeField : attributeFields) {
 				try {
@@ -997,55 +986,86 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 							: Integer.parseInt(parentControlPort) : Integer
 							.parseInt(possibleControlConnection.split("\\:")[1]);
 
-						IceMediaStream relatedIceStream = iceAgent.getStream(rtpmap);
+						IceMediaStream relatedIceStream = iceAgent.isOver()
+							? null : iceAgent.getStream(rtpmap.toLowerCase());
 						Component rtpComponent = null, rtcpComponent = null;
 						if (relatedIceStream != null) {
 				            rtpComponent = relatedIceStream.getComponent(Component.RTP);
 				            rtcpComponent = relatedIceStream.getComponent(Component.RTCP);
+						}
+						if (shouldParseCandidatesAndFeedIceAgent) {
+							logger.debug("%% Shall handle this remote SDP "
+								+ "to extract relevant ICE information! %%");
+						} else {
+							logger.debug("%% Shall handle this local SDP "
+								+ "to extract relevant ICE information! %%");
+						}
+						logger.debug("%% But are we done with the associated "
+							+ "Ice Agent? R: {} %%", iceAgent.isOver());
+						if (!iceAgent.isOver()) {
+							logger.debug("%% Current Ice Agent streams: {} %%",
+								iceAgent.getStreams());
 						}
 			            if (shouldParseCandidatesAndFeedIceAgent && relatedIceStream != null
 								&& (rtpComponent != null && rtpComponent
 									.getDefaultRemoteCandidate() == null)
 								&& (rtcpComponent == null || rtcpComponent
 									.getDefaultRemoteCandidate() == null)) {
-			            	logger.debug("%% About to attempt extracting relevant"
-								+ " ICE information from remote SDP.");
-			            	String remoteIceUsernameFragment = sdp.getAttribute("ice-ufrag");
-		                	relatedIceStream.setRemoteUfrag(remoteIceUsernameFragment);
-		                	logger.debug("%% Remote ICE username fragment: {} set"
-	                			+ " into related ICE media stream", remoteIceUsernameFragment);
-			            	String remoteIcePassword = sdp.getAttribute("ice-pwd");
-		                	relatedIceStream.setRemotePassword(remoteIcePassword);
-		                	logger.debug("%% Remote ICE password: {} set"
-		                			+ " into related ICE media stream", remoteIcePassword);
-				            TransportAddress defaultRemoteRtpAddress = new TransportAddress
-			            		(dataAddress, dataPort, Transport.UDP);
-				            Candidate<?> defaultRtpCandidate = rtpComponent
-			            		.findRemoteCandidate(defaultRemoteRtpAddress);
-				            rtpComponent.setDefaultRemoteCandidate(defaultRtpCandidate);
-							logger.debug("%% Related ICE stream's RTP component:"
-								+ " {}:{} ({}) %%", rtpComponent, dataAddress, dataPort);
-				            if (rtcpComponent != null) {
-					            TransportAddress defaultRemoteRtcpAddress = new TransportAddress
-				            		(controlAddress, controlPort, Transport.UDP);
-					            Candidate<?> defaultRtcpCandidate = rtpComponent
-				            		.findRemoteCandidate(defaultRemoteRtcpAddress);
-					            rtcpComponent.setDefaultRemoteCandidate(defaultRtcpCandidate);
-								logger.debug("%% Related ICE stream's RTCP component:"
-									+ " ({}:{}) {} %%", rtcpComponent, controlAddress, controlPort);
-				            }
+							boolean sdpSupportsIce = false;
 							for (AttributeField candidateAttributeField : attributeFields) {
 								if (candidateAttributeField.getName() != null
 										&& candidateAttributeField.getName()
 											.equals(CandidateAttribute.NAME)) {
-									retrieveCandidateInfoAndBindToAgentIfApplicable
-										(relatedIceStream, candidateAttributeField);
+					            	logger.debug("%% Remote SDP contains some ICE candidate"
+										+ " information: {} %%", candidateAttributeField);
+									sdpSupportsIce = true;
+								}
+							}
+							if (!sdpSupportsIce) {
+				            	logger.debug("%% Remote SDP contains no ICE information, "
+			            			+ "so ICE processing shall be skipped. %%");
+				            	cleanUpIceAgent(callId, type, iceAgent,
+			            			relatedIceStream, rtpComponent, rtcpComponent);
+							} else {
+				            	logger.debug("%% About to attempt extracting relevant"
+										+ " ICE information from remote SDP. %%");
+				            	String remoteIceUsernameFragment = sdp.getAttribute("ice-ufrag");
+			                	relatedIceStream.setRemoteUfrag(remoteIceUsernameFragment);
+				            	String remoteIcePassword = sdp.getAttribute("ice-pwd");
+			                	relatedIceStream.setRemotePassword(remoteIcePassword);
+			                	logger.debug("%% Remote ICE username fragment: {} set"
+		                			+ " into related ICE media stream. %%", remoteIceUsernameFragment);
+			                	logger.debug("%% Remote ICE password: {} set"
+		                			+ " into related ICE media stream. %%", remoteIcePassword);
+					            TransportAddress defaultRemoteRtpAddress = new TransportAddress
+				            		(dataAddress, dataPort, Transport.UDP);
+					            Candidate<?> defaultRtpCandidate = rtpComponent
+				            		.findRemoteCandidate(defaultRemoteRtpAddress);
+					            rtpComponent.setDefaultRemoteCandidate(defaultRtpCandidate);
+								logger.debug("%% Related ICE stream's RTP component:"
+									+ " {}:{} ({}) %%", rtpComponent, dataAddress, dataPort);
+					            if (rtcpComponent != null) {
+						            TransportAddress defaultRemoteRtcpAddress = new TransportAddress
+					            		(controlAddress, controlPort, Transport.UDP);
+						            Candidate<?> defaultRtcpCandidate = rtpComponent
+					            		.findRemoteCandidate(defaultRemoteRtcpAddress);
+						            rtcpComponent.setDefaultRemoteCandidate(defaultRtcpCandidate);
+									logger.debug("%% Related ICE stream's RTCP component:"
+										+ " ({}:{}) {} %%", rtcpComponent, controlAddress, controlPort);
+					            }
+								for (AttributeField candidateAttributeField : attributeFields) {
+									if (candidateAttributeField.getName() != null
+											&& candidateAttributeField.getName()
+											.equals(CandidateAttribute.NAME)) {
+										retrieveCandidateInfoAndBindToAgentIfApplicable
+											(relatedIceStream, candidateAttributeField);
+									}
 								}
 							}
 			            } else if (!shouldParseCandidatesAndFeedIceAgent
 			            		&& relatedIceStream != null && rtpComponent != null) {
 			            	logger.debug("%% About to attempt extracting relevant"
-								+ " ICE information from local SDP.");
+								+ " ICE information from local SDP. %%");
 			            	for (LocalCandidate localCandidate
 			            			: rtpComponent.getLocalCandidates()) {
 			            		if (localCandidate.getType()
@@ -1071,7 +1091,6 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 				            	}
 			            	}
 			            }
-
 						callback.onConnectionInfoExtracted(dataAddress, dataPort,
 							controlAddress, controlPort,rtpmap, codecType, direction);
 						someConnectionInfoExtractedSuccessfully = true;
@@ -1131,6 +1150,32 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 			}
 		}
 		return String.format(Locale.US, "%s:%s", controlAddress, controlPort);
+	}
+
+	private void cleanUpIceAgent(String callId, SessionType type, Agent iceAgent) {
+		cleanUpIceAgent(callId, type, iceAgent, null, null, null);
+	}
+
+	private void cleanUpIceAgent(String callId, SessionType type,
+			Agent iceAgent, IceMediaStream mediaStream,
+			Component rtpComponent, Component rtcpComponent) {
+		if (mediaStream != null) {
+			if (rtpComponent != null) {
+				mediaStream.removeComponent(rtpComponent);
+			}
+			if (rtcpComponent != null) {
+				mediaStream.removeComponent(rtcpComponent);
+			}
+		}
+		if (iceAgent != null) {
+			if (mediaStream != null) {
+				iceAgent.removeStream(mediaStream);
+			}
+			if (iceAgent.getStreamCount() == 0) {
+				iceAgents.remove(getSessionKey(callId, type));
+				iceAgent.free();
+			}
+		}
 	}
 
 	private void retrieveCandidateInfoAndBindToAgentIfApplicable
@@ -1193,6 +1238,119 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
         RemoteCandidate remoteCandidate = new RemoteCandidate(transportAddress,
     		component, type, foundation, priority, relatedCandidate);
         component.addRemoteCandidate(remoteCandidate);
+	}
+
+	private synchronized void doPrepareStream
+		(String callId, SessionType type, CallRole actualRole,
+		SupportedMediaCodec mediaCodecOfInterest,
+		MediaDirection offerDirection,
+		String offerDataAddress, int offerDataPort,
+		String offerControlAddress, int offerControlPort,
+		MediaDirection answerDirection,
+		String answerDataAddress, int answerDataPort,
+		String answerControlAddress, int answerControlPort) {
+		doPrepareStream(callId, type, actualRole, mediaCodecOfInterest,
+			offerDirection, offerDataAddress, offerDataPort,
+			offerControlAddress, offerControlPort,
+			answerDirection, answerDataAddress, answerDataPort,
+			answerControlAddress, answerControlPort,
+			null, -1, null, -1);
+	}
+
+	private synchronized void doPrepareStream
+			(String callId, SessionType type, CallRole actualRole,
+			SupportedMediaCodec mediaCodecOfInterest,
+			MediaDirection offerDirection,
+			String offerDataAddress, int offerDataPort,
+			String offerControlAddress, int offerControlPort,
+			MediaDirection answerDirection,
+			String answerDataAddress, int answerDataPort,
+			String answerControlAddress, int answerControlPort,
+			String remoteDataAddress, int remoteDataPort,
+			String remoteControlAddress, int remoteControlPort) {
+		if (!preparedStreams.containsKey(getSessionKey(callId, type))) {
+			preparedStreams.put(getSessionKey(callId, type),
+				new HashMap<SupportedMediaCodec, Session>());
+		}
+		switch (actualRole) {
+			case CALLER:
+				if ((remoteDataAddress == null || remoteDataPort == -1
+						|| remoteControlAddress == null || remoteControlPort == -1)
+						|| (answerDataAddress.equals(remoteDataAddress)
+						&& answerDataPort == remoteDataPort
+						&& answerControlAddress.equals(remoteControlAddress)
+						&& answerControlPort == remoteControlPort)) {
+					logger.debug("%% Prepared a {} ({}) stream from "
+						+ "[rtp = {}:{}, rtcp = {}:{}] to [rtp = {}:{},"
+						+ " rtcp = {}:{}]! %%", mediaCodecOfInterest,
+						offerDirection, offerDataAddress, offerDataPort,
+						offerControlAddress, offerControlPort, answerDataAddress,
+						answerDataPort, answerControlAddress, answerControlPort);
+					preparedStreams.get(getSessionKey(callId, type)).put
+						(mediaCodecOfInterest, new Session(offerDataAddress,
+						offerDataPort, offerControlAddress, offerControlPort,
+						answerDataAddress, answerDataPort, answerControlAddress,
+						answerControlPort, offerDirection));
+				} else {
+					logger.debug("%% Prepared a {} ({}) stream from "
+						+ "[rtp = {}:{}, rtcp = {}:{}] to [rtp = {}:{} --> {}:{},"
+						+ " rtcp = {}:{} --> {}:{}]! %%", mediaCodecOfInterest,
+						offerDirection, offerDataAddress, offerDataPort,
+						offerControlAddress, offerControlPort, answerDataAddress,
+						answerDataPort, remoteDataAddress, remoteDataPort,
+						answerControlAddress, answerControlPort,
+						remoteControlAddress, remoteControlPort);
+					preparedStreams.get(getSessionKey(callId, type)).put
+						(mediaCodecOfInterest, new Session(offerDataAddress,
+						offerDataPort, offerControlAddress, offerControlPort,
+						remoteDataAddress, remoteDataPort, remoteControlAddress,
+						remoteControlPort, offerDirection));
+				}
+				break;
+			case CALLEE:
+				if ((remoteDataAddress == null || remoteDataPort == -1
+						|| remoteControlAddress == null || remoteControlPort == -1)
+						|| (offerDataAddress.equals(remoteDataAddress)
+						&& offerDataPort == remoteDataPort
+						&& offerControlAddress.equals(remoteControlAddress)
+						&& offerControlPort == remoteControlPort)) {
+					logger.debug("%% Prepared a {} ({}) stream from "
+						+ "[rtp = {}:{}, rtcp = {}:{}] to [rtp = {}:{},"
+						+ " rtcp = {}:{}]! %%", mediaCodecOfInterest,
+						answerDirection, answerDataAddress, answerDataPort,
+						answerControlAddress, answerControlPort, offerDataAddress,
+						offerDataPort, offerControlAddress, offerControlPort);
+					preparedStreams.get(getSessionKey(callId, type)).put
+						(mediaCodecOfInterest, new Session(answerDataAddress,
+						answerDataPort, answerControlAddress, answerControlPort,
+						offerDataAddress, offerDataPort, offerControlAddress,
+						offerControlPort, answerDirection));
+				} else {
+					logger.debug("%% Prepared a {} ({}) stream from "
+						+ "[rtp = {}:{}, rtcp = {}:{}] to [rtp = {}:{} --> {}:{},"
+						+ " rtcp = {}:{} --> {}:{}]! %%", mediaCodecOfInterest,
+						answerDirection, answerDataAddress, answerDataPort,
+						answerControlAddress, answerControlPort, offerDataAddress,
+						offerDataPort, remoteDataAddress, remoteDataPort,
+						offerControlAddress, offerControlPort,
+						remoteControlAddress, remoteControlPort);
+					preparedStreams.get(getSessionKey(callId, type)).put
+						(mediaCodecOfInterest, new Session(answerDataAddress,
+						answerDataPort, answerControlAddress, answerControlPort,
+						remoteDataAddress, remoteDataPort, remoteControlAddress,
+						remoteControlPort, answerDirection));
+				}
+				break;
+		}
+		if (postponedStreams.containsKey(getSessionKey(callId, type))) {
+			performSessionSetup(callId, type, postponedStreams
+				.get(getSessionKey(callId, type)));
+		} else {
+			logger.debug("%% If there was a scheduled setup, it was canceled,"
+				+ " so, prepared {} ({}) stream discarded. Otherwise, stream "
+				+ "was prepared and is ready to be setup. %%",
+				mediaCodecOfInterest, answerDirection);
+		}
 	}
 
 	@Override
