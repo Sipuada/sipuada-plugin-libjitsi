@@ -1035,10 +1035,20 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 							} else {
 				            	logger.debug("%% About to attempt extracting relevant"
 									+ " ICE information from remote SDP. %%");
-				            	String remoteIceUsernameFragment = sdp.getAttribute("ice-ufrag");
+				            	String remoteIceUsernameFragment = mediaDescription
+			            			.getAttribute(IceSdpUtils.ICE_UFRAG);
+				            	if (remoteIceUsernameFragment == null
+				            			|| remoteIceUsernameFragment.trim().isEmpty()) {
+				            		remoteIceUsernameFragment = sdp.getAttribute(IceSdpUtils.ICE_UFRAG);
+				            	}
 			                	relatedIceStream.setRemoteUfrag(remoteIceUsernameFragment);
-				            	String remoteIcePassword = sdp.getAttribute("ice-pwd");
-			                	relatedIceStream.setRemotePassword(remoteIcePassword);
+				            	String remoteIcePassword = mediaDescription
+			            			.getAttribute(IceSdpUtils.ICE_PWD);
+				            	if (remoteIcePassword == null
+				            			|| remoteIcePassword.trim().isEmpty()) {
+				            		remoteIcePassword = sdp.getAttribute(IceSdpUtils.ICE_PWD);
+				            	}
+				            	relatedIceStream.setRemotePassword(remoteIcePassword);
 			                	logger.debug("%% Remote ICE username fragment: {} set"
 		                			+ " into related ICE media stream. %%", remoteIceUsernameFragment);
 			                	logger.debug("%% Remote ICE password: {} set"
