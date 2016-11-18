@@ -65,7 +65,7 @@ import android.javax.sdp.SessionDescription;
 
 public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 
-	private static final boolean ICE_IS_SUPPORTED = false;
+	private static final boolean ICE_IS_LOCALLY_SUPPORTED = true;
 	private final Logger logger = LoggerFactory.getLogger
 		(LibJitsiMediaSipuadaPlugin.class);
 
@@ -425,7 +425,7 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 			allMediaFormats, mediaDescriptions, iceAgent);
 		offer.setMediaDescriptions(mediaDescriptions);
 		IceSdpUtils.initSessionDescription(offer, iceAgent);
-		if (!ICE_IS_SUPPORTED) {
+		if (!ICE_IS_LOCALLY_SUPPORTED) {
 			removeIceInformationFromSdp(offer);
 		}
 		logger.info("<< {{}} codecs were declared in offer {{}} >>",
@@ -498,7 +498,7 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 		}
 		answer.setMediaDescriptions(answerMediaDescriptions);
 		IceSdpUtils.initSessionDescription(answer, iceAgent);
-		if (!ICE_IS_SUPPORTED) {
+		if (!ICE_IS_LOCALLY_SUPPORTED) {
 			removeIceInformationFromSdp(answer);
 		}
 		logger.info("<< {{}} codecs were declared in {} answer {{}} to {} offer {{}} >>",
@@ -642,23 +642,27 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 		}
 	}
 
-//	@SuppressWarnings("unchecked")
+	@SuppressWarnings("unchecked")
 	private void removeIceInformationFromSdp(SessionDescription sdp) {
-//		try {
-//			Vector<MediaDescription> mediaDescriptions = sdp.getMediaDescriptions(true);
-//			for (MediaDescription mediaDescription : mediaDescriptions) {
-//				Vector<AttributeField> attributeFields = mediaDescription.getAttributes(true);
-//			}
-//		} catch (SdpException ignore) {}
-		//TODO remove all candidate attributes from all media descriptions, as well as
-		//additional ICE parameters that were added to this session description.
+		try {
+			Vector<MediaDescription> mediaDescriptions = sdp.getMediaDescriptions(true);
+			for (MediaDescription mediaDescription : mediaDescriptions) {
+				mediaDescription.removeAttribute(IceSdpUtils.MID);
+				while (mediaDescription.getAttribute(CandidateAttribute.NAME) != null) {
+					mediaDescription.removeAttribute(CandidateAttribute.NAME);
+				}
+			}
+			sdp.removeAttribute(IceSdpUtils.ICE_OPTIONS);
+			sdp.removeAttribute(IceSdpUtils.ICE_UFRAG);
+			sdp.removeAttribute(IceSdpUtils.ICE_PWD);
+		} catch (SdpException ignore) {}
 	}
 
 	interface ExtractionCallback {
 
 		void onConnectionInfoExtracted(String dataAddress, int dataPort,
 			String controlAddress, int controlPort, String rtpmap,
-			int codecType, MediaDirection direction);
+			int codecType, MediaDirection direction, boolean peerSupportsIce);
 
 		void onExtractionIgnored(String rtpmap, int codecType);
 
@@ -686,8 +690,8 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 
 		@Override
 		public abstract void onConnectionInfoExtracted(String dataAddress,
-			int dataPort, String controlAddress, int controlPort,
-			String rtpmap, int codecType, MediaDirection direction);
+			int dataPort, String controlAddress, int controlPort, String rtpmap,
+			int codecType, MediaDirection direction, boolean peerSupportsIce);
 
 		@Override
 		public final void onExtractionIgnored(String rtpmap, int codecType) {
@@ -732,9 +736,6 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 	private void prepareForSessionSetup(final String callId, final SessionType type,
 			final SessionDescription offer, final SessionDescription answer, final Agent iceAgent)
 					throws SdpException {
-		if (!ICE_IS_SUPPORTED) {
-			cleanUpIceAgent(callId, type, iceAgent);
-		}
 		final CallRole actualRole = roles.get(getSessionKey(callId, type));
 		extractConnectionInformation(answer, callId, type, iceAgent, actualRole == CallRole.CALLER,
 				new ExtractionCallbackImpl(roles.get(getSessionKey(callId, type)).toString(), "ANSWER") {
@@ -743,7 +744,8 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 			public void onConnectionInfoExtracted(final String answerDataAddress,
 					final int answerDataPort, final String answerControlAddress,
 					final int answerControlPort, final String answerRtpmap,
-					final int answerCodecType, final MediaDirection answerDirection) {
+					final int answerCodecType, final MediaDirection answerDirection,
+					final boolean iceIsSupportedByAnswererPeer) {
 				extractConnectionInformation(offer, callId, type, iceAgent, actualRole == CallRole.CALLEE,
 						new ExtractionCallbackImpl(roles.get(getSessionKey(callId, type)).toString(), "OFFER") {
 
@@ -751,7 +753,8 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 					public void onConnectionInfoExtracted(final String offerDataAddress,
 							final int offerDataPort, final String offerControlAddress,
 							final int offerControlPort, final String offerRtpmap,
-							final int offerCodecType, final MediaDirection offerDirection) {
+							final int offerCodecType, final MediaDirection offerDirection,
+							final boolean iceIsSupportedByOffererPeer) {
 						if (offerRtpmap.toLowerCase().trim().equals
 								(answerRtpmap.toLowerCase().trim())) {
 							SupportedMediaCodec supportedMediaCodec = null;
@@ -791,8 +794,16 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 									answerRtpmap + " - " + answerCodecType);
 							}
 							final SupportedMediaCodec mediaCodecOfInterest = supportedMediaCodec;
-							if (iceAgent.isOver()) {
-								doPrepareStream(callId, type, actualRole, mediaCodecOfInterest,
+							final IceMediaStream mediaStream = iceAgent.getStream
+								(mediaCodecOfInterest.getRtpmap().toLowerCase());
+							final Component rtpComponent = mediaStream == null
+								? null : mediaStream.getComponent(Component.RTP);
+							final Component rtcpComponent = mediaStream == null
+								? null : mediaStream.getComponent(Component.RTCP);
+							if (!iceIsSupportedByOffererPeer || !iceIsSupportedByAnswererPeer) {
+								cleanUpIceAgent(callId, type, iceAgent,
+									mediaStream, rtpComponent, rtcpComponent);
+								doPrepareStream(callId, type, actualRole, supportedMediaCodec,
 									offerDirection, offerDataAddress, offerDataPort,
 									offerControlAddress, offerControlPort,
 									answerDirection, answerDataAddress, answerDataPort,
@@ -809,19 +820,15 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 											Agent agent = (Agent) event.getSource();
 											logger.debug("ICE4J:agent.getState(): {}", agent.getState());
 											if (agent.getState().equals(IceProcessingState.TERMINATED)) {
-												IceMediaStream mediaStream = agent
-													.getStream(mediaCodecOfInterest.getRtpmap().toLowerCase());
 												if (mediaStream == null) {
 													return;
 												}
-												Component rtpComponent = mediaStream.getComponent(Component.RTP);
 												CandidatePair rtpPair = rtpComponent.getSelectedPair();
 												TransportAddress rtpTransportAddress = rtpPair
 													.getRemoteCandidate().getTransportAddress();
 												String remoteDataAddress = rtpTransportAddress
 													.getAddress().getHostAddress();
 												int remoteDataPort = rtpTransportAddress.getPort();
-												Component rtcpComponent = mediaStream.getComponent(Component.RTCP);
 												CandidatePair rtcpPair = rtcpComponent.getSelectedPair();
 												TransportAddress rtcpTransportAddress = rtcpPair
 													.getRemoteCandidate().getTransportAddress();
@@ -1006,12 +1013,13 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 							logger.debug("%% Current Ice Agent streams: {} %%",
 								iceAgent.getStreams());
 						}
+						boolean sdpSupportsIce = ICE_IS_LOCALLY_SUPPORTED;
 			            if (shouldParseCandidatesAndFeedIceAgent && relatedIceStream != null
 								&& (rtpComponent != null && rtpComponent
 									.getDefaultRemoteCandidate() == null)
 								&& (rtcpComponent == null || rtcpComponent
 									.getDefaultRemoteCandidate() == null)) {
-							boolean sdpSupportsIce = false;
+							sdpSupportsIce = false;
 							for (AttributeField candidateAttributeField : attributeFields) {
 								if (candidateAttributeField.getName() != null
 										&& candidateAttributeField.getName()
@@ -1024,11 +1032,9 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 							if (!sdpSupportsIce) {
 				            	logger.debug("%% Remote SDP contains no ICE information, "
 			            			+ "so ICE processing shall be skipped. %%");
-				            	cleanUpIceAgent(callId, type, iceAgent,
-			            			relatedIceStream, rtpComponent, rtcpComponent);
 							} else {
 				            	logger.debug("%% About to attempt extracting relevant"
-										+ " ICE information from remote SDP. %%");
+									+ " ICE information from remote SDP. %%");
 				            	String remoteIceUsernameFragment = sdp.getAttribute("ice-ufrag");
 			                	relatedIceStream.setRemoteUfrag(remoteIceUsernameFragment);
 				            	String remoteIcePassword = sdp.getAttribute("ice-pwd");
@@ -1092,7 +1098,8 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 			            	}
 			            }
 						callback.onConnectionInfoExtracted(dataAddress, dataPort,
-							controlAddress, controlPort,rtpmap, codecType, direction);
+							controlAddress, controlPort, rtpmap, codecType,
+							direction, sdpSupportsIce);
 						someConnectionInfoExtractedSuccessfully = true;
 					}
 				} catch (Throwable anyIssue) {
@@ -1150,10 +1157,6 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 			}
 		}
 		return String.format(Locale.US, "%s:%s", controlAddress, controlPort);
-	}
-
-	private void cleanUpIceAgent(String callId, SessionType type, Agent iceAgent) {
-		cleanUpIceAgent(callId, type, iceAgent, null, null, null);
 	}
 
 	private void cleanUpIceAgent(String callId, SessionType type,
