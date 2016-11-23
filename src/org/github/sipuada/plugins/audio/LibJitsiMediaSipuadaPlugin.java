@@ -346,11 +346,11 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 			iceAgent = new Agent(Level.ALL, localAddress);
 			iceAgent.setTrickling(false);
 			iceAgent.setUseHostHarvester(true);
-			turnHarvester = createTurnHarvester(localAddress);
+			turnHarvester = createTurnHarvester();
 			if (turnHarvester != null) {
 				iceAgent.addCandidateHarvester(turnHarvester);
 			}
-			stunHarvester = createStunHarvester(localAddress);
+			stunHarvester = createStunHarvester();
 			if (stunHarvester != null) {
 				iceAgent.addCandidateHarvester(stunHarvester);
 			}
@@ -359,11 +359,11 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 		return iceAgent;
 	}
 
-	private CandidateHarvester createTurnHarvester(String localAddress) {
+	private CandidateHarvester createTurnHarvester() {
 		return null;
 	}
 
-	private CandidateHarvester createStunHarvester(String localAddress) {
+	private CandidateHarvester createStunHarvester() {
     	try {
 			return new StunCandidateHarvester(new TransportAddress
 				(InetAddress.getByName("stun4.l.google.com"), 19302, Transport.UDP));
@@ -1372,7 +1372,15 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 		synchronized (this) {
 			Record record = records.get(getSessionKey(callId, type));
 			SessionDescription offer = record.getOffer(), answer = record.getAnswer();
-			if (!preparedStreams.containsKey((getSessionKey(callId, type)))) {
+			if (offer == null || answer == null) {
+				logger.info("^^ {} aborted session setup attempt in context of call {}"
+					+ " and will rely on new offer/answer exchange initiated"
+					+ " by a recently sent UPDATE request...\n"
+					+ "Role: {{}}\nOffer: {{}}\nAnswer: {{}} ^^",
+					LibJitsiMediaSipuadaPlugin.class.getSimpleName(), callId,
+					roles.get(getSessionKey(callId, type)), offer, answer);
+				return true;
+			} else if (!preparedStreams.containsKey((getSessionKey(callId, type)))) {
 				logger.info("^^ {} postponed session setup in context of call {}...\n"
 					+ "Role: {{}}\nOffer: {{}}\nAnswer: {{}} ^^",
 					LibJitsiMediaSipuadaPlugin.class.getSimpleName(), callId,
