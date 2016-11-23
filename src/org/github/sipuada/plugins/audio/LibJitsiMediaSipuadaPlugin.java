@@ -823,6 +823,8 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 												if (mediaStream == null) {
 													return;
 												}
+												logger.debug("ICE processing finalized successfully, "
+													+ "preparing stream using best addresses...");
 												CandidatePair rtpPair = rtpComponent.getSelectedPair();
 												TransportAddress rtpTransportAddress = rtpPair
 													.getRemoteCandidate().getTransportAddress();
@@ -845,6 +847,17 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 													answerControlAddress, answerControlPort,
 													remoteDataAddress, remoteDataPort,
 													remoteControlAddress, remoteControlPort);
+											} else if (agent.getState().equals(IceProcessingState.FAILED)) {
+												logger.debug("ICE processing FAILED! Preparing stream "
+													+ "using the default addresses available...");
+												iceAgent.removeStateChangeListener(this);
+												cleanUpIceAgent(callId, type, iceAgent,
+													mediaStream, rtpComponent, rtcpComponent);
+												doPrepareStream(callId, type, actualRole, mediaCodecOfInterest,
+													offerDirection, offerDataAddress, offerDataPort,
+													offerControlAddress, offerControlPort,
+													answerDirection, answerDataAddress, answerDataPort,
+													answerControlAddress, answerControlPort);
 											}
 										}
 									}
