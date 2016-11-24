@@ -1384,10 +1384,11 @@ public class LibJitsiMediaSipuadaPlugin implements SipuadaPlugin {
 		logger.debug("===*** performSessionSetup -> {}", getSessionKey(callId, type));
 		synchronized (this) {
 			Record record = records.get(getSessionKey(callId, type));
-			SessionDescription offer = record.getOffer(), answer = record.getAnswer();
-			if (offer == null || answer == null) {
+			SessionDescription offer = record != null ? record.getOffer() : null;
+			SessionDescription answer = record != null ? record.getAnswer() : null;
+			if (record == null || offer == null || answer == null) {
 				logger.info("^^ {} aborted session setup attempt in context of call {}"
-					+ " and will rely on new offer/answer exchange initiated"
+					+ " and will rely upon new offer/answer exchange initiated"
 					+ " by a recently sent UPDATE request...\n"
 					+ "Role: {{}}\nOffer: {{}}\nAnswer: {{}} ^^",
 					LibJitsiMediaSipuadaPlugin.class.getSimpleName(), callId,
