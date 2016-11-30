@@ -113,12 +113,14 @@ public class LibJitsiMediaSipuadaPlugin extends SipuadaPlugin {
 			}
 			if (!streamIsRejected) {
 				logger.info("^^ Should setup a {} *data* stream [{}] from "
-					+ "{}:{} (origin) to {}:{} (destination)! ^^", supportedMediaCodec,
-					streamName, session.getLocalDataAddress(), session.getLocalDataPort(),
+					+ "{}:{} (origin) to {}:{} (destination)! ^^",
+					supportedMediaCodec.getRtpmap(), streamName,
+					session.getLocalDataAddress(), session.getLocalDataPort(),
 					session.getRemoteDataAddress(), session.getRemoteDataPort());
 				logger.info("^^ Should setup a {} *control* stream [{}] from "
-					+ "{}:{} (origin) to {}:{} (destination)! ^^", supportedMediaCodec,
-					streamName, session.getLocalControlAddress(),
+					+ "{}:{} (origin) to {}:{} (destination)! ^^",
+					supportedMediaCodec.getRtpmap(), streamName,
+					session.getLocalControlAddress(),
 					session.getLocalControlPort(), session.getRemoteControlAddress(),
 					session.getRemoteControlPort());
 				MediaFormat mediaFormat = mediaService.getFormatFactory()
@@ -141,9 +143,9 @@ public class LibJitsiMediaSipuadaPlugin extends SipuadaPlugin {
 					session.setPayload(mediaStream);
 				} catch (Throwable anyIssue) {
 					logger.info("^^ Could not setup {} *data* stream [{}]! ^^",
-						supportedMediaCodec, streamName);
+						supportedMediaCodec.getRtpmap(), streamName);
 					logger.info("^^ Could not setup {} *control* stream [{}]! ^^",
-						supportedMediaCodec, streamName, anyIssue);
+						supportedMediaCodec.getRtpmap(), streamName, anyIssue);
 				}
 			} else {
 				session.setPayload(mediaStream);
@@ -158,9 +160,9 @@ public class LibJitsiMediaSipuadaPlugin extends SipuadaPlugin {
 					&& !mediaStream.getDirection().toString().toLowerCase().trim()
 					.equals(MediaDirection.INACTIVE.toString().toLowerCase().trim())) {
 				logger.info("^^ Starting {} *data* stream [{}]! ^^",
-					supportedMediaCodec, mediaStream.getName());
+					supportedMediaCodec.getRtpmap(), mediaStream.getName());
 				logger.info("^^ Starting {} *control* stream [{}]! ^^",
-					supportedMediaCodec, mediaStream.getName());
+					supportedMediaCodec.getRtpmap(), mediaStream.getName());
 				mediaStream.start();
 			}
 		}
@@ -176,24 +178,24 @@ public class LibJitsiMediaSipuadaPlugin extends SipuadaPlugin {
 			MediaStream mediaStream = (MediaStream) session.getPayload();
 			if (mediaStream != null) {
 				logger.info("^^ Should terminate {} *data* stream [{}] from "
-					+ "{}:{} (origin) to {}:{} (destination)! ^^", supportedMediaCodec,
-					mediaStream.getName(), session.getLocalDataAddress(),
-					session.getLocalDataPort(), session.getRemoteDataAddress(),
-					session.getRemoteDataPort());
+					+ "{}:{} (origin) to {}:{} (destination)! ^^",
+					supportedMediaCodec.getRtpmap(), mediaStream.getName(),
+					session.getLocalDataAddress(), session.getLocalDataPort(),
+					session.getRemoteDataAddress(), session.getRemoteDataPort());
 				logger.info("^^ Should terminate {} *control* stream [{}] from "
-					+ "{}:{} (origin) to {}:{} (destination)! ^^", supportedMediaCodec,
-					mediaStream.getName(), session.getLocalControlAddress(),
-					session.getLocalControlPort(), session.getRemoteControlAddress(),
-					session.getRemoteControlPort());
+					+ "{}:{} (origin) to {}:{} (destination)! ^^",
+					supportedMediaCodec.getRtpmap(), mediaStream.getName(),
+					session.getLocalControlAddress(), session.getLocalControlPort(),
+					session.getRemoteControlAddress(), session.getRemoteControlPort());
 				try {
 					logger.info("^^ Stopping {} stream [{}]... ^^",
-						supportedMediaCodec, mediaStream.getName());
+						supportedMediaCodec.getRtpmap(), mediaStream.getName());
 					mediaStream.stop();
 				} finally {
 					mediaStream.close();
 				}
 				logger.info("^^ {} stream [{}] stopped! ^^",
-					supportedMediaCodec, mediaStream.getName());
+					supportedMediaCodec.getRtpmap(), mediaStream.getName());
 			}
 		}		
 	}
