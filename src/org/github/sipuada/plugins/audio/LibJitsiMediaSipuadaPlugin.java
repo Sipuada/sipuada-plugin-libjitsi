@@ -22,24 +22,27 @@ public class LibJitsiMediaSipuadaPlugin extends SipuadaPlugin {
 
 	protected enum AvailableMediaCodec implements SupportedMediaCodec {
 
-    	PCMA_8("PCMA", 8, 8000, SupportedMediaType.AUDIO, true),
-    	SPEEX_8("SPEEX", 97, 8000, SupportedMediaType.AUDIO, false),
-    	SPEEX_16("SPEEX", 97, 16000, SupportedMediaType.AUDIO, false),
-    	SPEEX_32("SPEEX", 97, 32000, SupportedMediaType.AUDIO, false);
-
+    	PCMA_8("PCMA", 8, 8000, SupportedMediaType.AUDIO, SessionType.BOTH, true),
+    	H264("H264", 99, 90000, SupportedMediaType.VIDEO, SessionType.EARLY, true),
+    	SPEEX_8("SPEEX", 97, 8000, SupportedMediaType.AUDIO, SessionType.BOTH, false),
+    	SPEEX_16("SPEEX", 97, 16000, SupportedMediaType.AUDIO, SessionType.BOTH, false),
+    	SPEEX_32("SPEEX", 97, 32000, SupportedMediaType.AUDIO, SessionType.BOTH, false);
     	private final String encoding;
     	private final int type;
     	private final int clockRate;
     	private final SupportedMediaType mediaType;
-    	private final boolean enabled;
+    	private final SessionType allowedSessionType;
+    	private final boolean enabledByDefault;
 
-    	private AvailableMediaCodec(String encoding, int type,
-        		int clockRate, SupportedMediaType mediaType, boolean enabled) {
+    	private AvailableMediaCodec(String encoding, int type, int clockRate,
+    			SupportedMediaType mediaType, SessionType allowedSessionType,
+    			boolean enabledByDefault) {
         	this.encoding = encoding;
     		this.type = type;
     		this.clockRate = clockRate;
     		this.mediaType = mediaType;
-    		this.enabled = enabled;
+    		this.allowedSessionType = allowedSessionType;
+    		this.enabledByDefault = enabledByDefault;
     	}
 
     	@Override
@@ -63,8 +66,13 @@ public class LibJitsiMediaSipuadaPlugin extends SipuadaPlugin {
 		}
 
     	@Override
-    	public boolean isEnabled() {
-			return enabled;
+    	public SessionType getAllowedSessionType() {
+    		return allowedSessionType;
+    	}
+
+    	@Override
+    	public boolean isEnabledByDefault() {
+			return enabledByDefault;
 		}
 
     }
