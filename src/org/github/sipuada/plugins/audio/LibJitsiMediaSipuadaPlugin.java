@@ -22,7 +22,7 @@ public class LibJitsiMediaSipuadaPlugin extends SipuadaPlugin {
 
 	protected enum AvailableMediaCodec implements SupportedMediaCodec {
 
-    	PCMA_8("PCMA", 8, 8000, SupportedMediaType.AUDIO, SessionType.BOTH, true),
+    	PCMA_8("PCMA", 8, 8000, SupportedMediaType.AUDIO, SessionType.REGULAR, true),
     	H264("H264", 99, 90000, SupportedMediaType.VIDEO, SessionType.EARLY, true),
     	SPEEX_8("SPEEX", 97, 8000, SupportedMediaType.AUDIO, SessionType.BOTH, false),
     	SPEEX_16("SPEEX", 97, 16000, SupportedMediaType.AUDIO, SessionType.BOTH, false),
@@ -92,7 +92,7 @@ public class LibJitsiMediaSipuadaPlugin extends SipuadaPlugin {
 	}
 
 	@Override
-	public void doSetupPreparedStreams(String callId, SessionType type,
+	public boolean doSetupPreparedStreams(String callId, SessionType type,
 			Map<String, Map<MediaCodecInstance, Session>> preparedStreams) {
 		MediaService mediaService = LibJitsi.getMediaService();
 		for (MediaCodecInstance supportedMediaCodec : preparedStreams
@@ -174,10 +174,11 @@ public class LibJitsiMediaSipuadaPlugin extends SipuadaPlugin {
 				mediaStream.start();
 			}
 		}
+		return true;
 	}
 
 	@Override
-	public void doTerminateStreams(String callId, SessionType type,
+	public boolean doTerminateStreams(String callId, SessionType type,
 			Map<String, Map<MediaCodecInstance, Session>> ongoingStreams) {
 		for (MediaCodecInstance supportedMediaCodec : ongoingStreams
 				.get(getSessionKey(callId, type)).keySet()) {
@@ -205,7 +206,8 @@ public class LibJitsiMediaSipuadaPlugin extends SipuadaPlugin {
 				logger.info("^^ {} stream [{}] stopped! ^^",
 					supportedMediaCodec.getRtpmap(), mediaStream.getName());
 			}
-		}		
+		}
+		return true;
 	}
 
 }
